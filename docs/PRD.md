@@ -162,6 +162,7 @@ Representative user stories:
    so that I don't have to build anything before having fun.
 5. As an **engineer/learner**, I want to inject a gunfire source mid-run, so that I can see
    a redirection wave form.
+6. As an **engineer/learner**, I want to learn the architecture of the implementation.
 
 ---
 
@@ -193,7 +194,7 @@ that build on that core.
     scenario; the player can immediately place/drag a hazard and see the crowd react — no
     files to author, no config to edit.
 - **R0.2** All four scenario templates (FR-13) ship as **bundled default data** loadable
-  from the UI without external assets.
+  from the UI without external assets. Only the Lecture Hall reequired on first release, other scenarios can be implemented in later releases.
   - AC: each template loads from the in-app library on a clean install.
 - **R0.3** Ship **sensible default parameters** for every tunable (panic decay, signage
   λ, trust mode, force weights, FPS/scale tier) so nothing must be set before play.
@@ -221,7 +222,7 @@ that build on that core.
   optionally panic-modulated (panic may raise desired speed up to the cap).
   - AC: no agent exceeds its max speed or max acceleration in any tick; raising panic does
     not produce speeds above the documented cap.
-- **R1.4** Agents are removed from the active simulation on egress (handoff to FR-5); a
+- **R1.4** Agents are removed from the active simulation after completing egress (handoff to FR-5); a
   removed agent exerts and receives no further forces.
   - AC: once an agent egresses it no longer appears in force computation or rendering.
 
@@ -229,9 +230,9 @@ that build on that core.
 
 - **R2.1** **Inter-agent repulsion / collision avoidance**: agents exert a short-range
   repulsive force on near neighbors so they avoid overlap and steer around each other. This
-  is the `f_crowd` term FR-14 composes.
+  is the `f_crowd` term FR-14 composes. Overlap is strictly forbidden.
   - AC: two agents on a collision course deflect rather than overlap; mean pairwise overlap
-    stays below a documented tolerance.
+    stays below a documented tolerance. No overlap at all.
 - **R2.2** **Density pressure**: in high local density, agents experience increased resistance
   (reduced effective speed / outward pressure), producing realistic slowdown at constrictions
   rather than free flow.
@@ -245,6 +246,8 @@ that build on that core.
 - **R2.4** Neighbor queries are spatially indexed (e.g., uniform grid / spatial hash) so
   crowd-force cost scales to Tier A counts (FR ties to NFR-P2).
   - AC: per-tick crowd-force time grows sub-quadratically with agent count up to ~10k.
+- **R2.5** **Herd Effect**: agents exert a attraction to the average velocity and direction of part of the crowd that is near them. When panic level increases, the attraction level increases.
+
 
 ### FR-3 Environment / Floor-Plan Model (core — synthesized) — P0
 
@@ -290,7 +293,7 @@ that build on that core.
   beyond capacity **queue** at the exit rather than teleporting through.
   - AC: egress rate at an exit never exceeds its capacity over any 1-second window; a queue
     forms when arrival rate exceeds capacity.
-- **R5.2** An agent reaching an exit is **removed (egressed)** from the active simulation and
+- **R5.2** An agent reaching an exit and passing it a small amount (clearing it) is **removed (egressed)** from the active simulation and
   counted as evacuated (handoff from R1.4).
   - AC: evacuated count increases by exactly one per egress; egressed agents are gone from
     the sim.
@@ -322,7 +325,7 @@ that build on that core.
 
 - **R7.1** A **base render loop** draws the current floor: walkable region, walls/obstacles,
   exits, and agents (color/encoding may reflect panic/state), behind the `Renderer` port (§9)
-  so the sim core stays render-agnostic.
+  so the sim core stays render-agnostic. render may include background of an image (jpg, png).
   - AC: a running scenario renders the floor and live agent motion; swapping the renderer
     adapter requires no change to the domain/application layers.
 - **R7.2** A **base interaction loop** maps user input (select, place, drag) to application-
@@ -410,7 +413,7 @@ that build on that core.
 ### FR-11 Dynamic Hazard & Panic Source System — P0
 
 - **R11.1** `PanicSource` types: `fire_visual`, `smoke`, `explosion_sound`,
-  `gunfire_audio`, `structural_collapse`. Each: `position`, `intensity`, `radius`,
+  `gunfire_audio`, `structural_collapse`, `earthquake`. Each: `position`, `intensity`, `radius`,
   `decay_rate`.
   - AC: each type exists with these fields; `decay_rate` reduces effective intensity over
     time and a source expires near zero intensity.
@@ -475,7 +478,7 @@ multi-level) FR-9 topology models.
   **a_i = f_exit + f_signage + f_panic_repulsion + f_crowd**, a superset of the FR-1 core
   steering terms (`f_exit` from FR-4, `f_signage` from FR-10, `f_panic_repulsion` from FR-11,
   `f_crowd` from FR-2).
-  - AC: all four terms are present and individually toggleable for debugging; disabling a
+  - AC: all four terms and their individual components are present and individually toggleable for debugging; disabling a
     term removes its effect.
 - **R14.2** Support conflict scenarios:
   (a) signage directing toward a **blocked** exit,
@@ -506,6 +509,8 @@ it.
   - AC: tabs switch the active level; minimap shows all levels stacked; overlay shows
     transition edges (stairs + elevators); per-level heatmap renders density (default) with
     a toggle to panic.
+- **R15.4 CLI** — all UI commands log INFO with their syntax, so the user can copy them as CLI commands. The app will receive CLI commands for all its UI commands..
+
 
 ---
 
@@ -556,7 +561,7 @@ the render thread (FR-6 R6.1, FR-7 R7.3).
 
 ### Other
 - **NFR-Q1 Code quality:** `flake8` clean, `mypy --strict` clean, ≥ 85% test coverage on
-  core/capability modules (per project standards).
+  core/capability modules (per project standards). All code commented, with type hints.
 - **NFR-Q2 Platform:** Windows 11; `pathlib` for all paths; UTF-8 I/O; PowerShell-documented
   run steps.
 - **NFR-Q3 Observability:** structured metrics (per-tick queue lengths, density, panic,
@@ -564,6 +569,8 @@ the render thread (FR-6 R6.1, FR-7 R7.3).
   extension of the FR-8 core metrics.
 - **NFR-Q4 Stability:** no scenario crashes or deadlocks the process; in-sim agent deadlocks
   are detected and surfaced (visual/log), not silent (ties to FR-13 R13.4, FR-5 R5.3).
+- **NFR-Q5 Visuals:** modern looking, aesthetic UI visuals.
+
 
 ---
 
