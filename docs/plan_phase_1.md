@@ -298,6 +298,12 @@ vetted (Windows wheel, maintenance, license) in Step 1.1 before install.
 ### 1.22 Case of no walls
 - **Do:** decide how to solve case of floorplan with no walls or not enclosed (eg 3 walls). Open walls should be treated as exits.
 
+### 1.23 Limited knowledge
+- **Do:** decide how to reflect agents not knowing where the emergency exit is (eg no sign in sight). Possible it to follow the herd.
+
+### 1.24 Spawn region
+- **Do:** define spawn region within the walkable region. For example, in stadium spawn aget in the seating areas but not in the hall areas.
+
 ---
 
 ## Verification (end-to-end)
