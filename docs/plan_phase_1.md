@@ -346,7 +346,26 @@ python -m crowd_evac
 
 ## Spike Results (filled during execution)
 
-- Step 1.3 render-only FPS @ 2k / 10k on target laptop: _TBD_
+- **Step 1.3 render-only FPS @ 2k / 10k on target laptop** (600 timed frames,
+  30-frame warmup excluded, SpriteList of circles, no sim, vsync off):
+  - 2k: mean **247.5** FPS / 1% low **124.5** / min **110.9** / max 332.8
+    (mean frame 4.04 ms).
+  - 10k: mean **57.6** FPS / 1% low **38.3** / min **36.4** / max 62.6
+    (mean frame 17.35 ms).
+- **Renderer decision (RK-1 gate): arcade — PASS.** At 10k agents even the
+  worst frame (36.4 FPS) and 1% low (38.3 FPS) clear the 30 FPS bar (NFR-P2),
+  so the real renderer (1.16) is built on arcade; the pyglet/moderngl fallback
+  (PRD §9) is **not** taken. Caveat: render-only; headroom over 30 FPS at 10k
+  is thin (~1.3× at the 1% low). The combined sim+render 10k measurement in
+  Step 1.21 is the real gate — re-confirm there before committing to Tier A.
+- **Env note (resolved 2026-06-03):** the `.venv` was rebuilt on **Python
+  3.12.10** (the original 3.14.5 venv had no `pymunk~=6.9.0` wheel and couldn't
+  compile it without MSVC). On 3.12, `pip install -e ".[dev]"` installs the full
+  tree cleanly — arcade 3.3.3 + its pinned pymunk 6.9.0 (prebuilt wheel) — with
+  no `--no-deps` hack. `flake8 src/`, `mypy src/ --strict`, and `pytest` (39
+  tests) all pass on 3.12; the earlier mypy `arcade` import-not-found errors are
+  gone now that arcade is installed. The pyglet `ctypes._pointer_type_cache`
+  DeprecationWarning persists, so the targeted pytest `filterwarnings` ignore
+  stays.
 - Step 1.21 sim+render FPS @ 2k / 10k, re-route latency, footprint: _TBD_
 - §8 EB-1..6 empirical thresholds: _TBD_
-- Renderer decision (arcade vs pyglet/moderngl fallback): _TBD_

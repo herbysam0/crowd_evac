@@ -4,20 +4,22 @@ Real-time 2D crowd-evacuation game with a pure NumPy simulation core.
 
 ## Requirements
 
-- **Python 3.11+** (tested on Python 3.14.5)
+- **Python 3.11–3.13** — developed and tested on **3.12.10**. Python 3.14 is
+  **not supported**: the `arcade` renderer pins `pymunk~=6.9.0`, which has no
+  3.14 wheel and will not compile without MSVC build tools.
 - Windows 11 with pip and venv
 
 ## Quick Start
 
 ```powershell
-# Verify Python version
-python --version  # Should be 3.11 or higher
+# Verify a supported interpreter is available (3.11-3.13; 3.14 is unsupported)
+py -3.12 --version  # Should print Python 3.12.x
 
 # Clone and navigate to project
 cd crowd_evac
 
-# Create and activate virtual environment
-python -m venv .venv
+# Create and activate virtual environment on Python 3.12
+py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 
 # Install dependencies from requirements.txt

@@ -523,6 +523,9 @@ The game runs on the **same modest laptop it ships for**:
 - **CPU:** AMD Ryzen 5 Pro 7535U (6c/12t, ~2.90 GHz base)
 - **GPU:** **integrated** AMD Radeon Graphics (shares system RAM)
 - **RAM:** 16 GB @ 4800 MT/s
+- **Runtime:** CPython **3.11–3.13** (developed and tested on **3.12.10**).
+  Python 3.14 is unsupported — the `arcade` renderer pins `pymunk~=6.9.0`,
+  which has no 3.14 wheel and will not compile without MSVC build tools.
 
 This is an **integrated-GPU APU**. Targets below are set realistically against it. The
 **integrated GPU is the binding rendering constraint**, especially for 10k-agent Tier A
