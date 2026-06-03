@@ -16,14 +16,15 @@ Functions defined here:
   of nearby agents (R2.5).
 - :func:`f_panic_repulsion` (step 1.10): Panic-source repulsion pushing
   agents down-gradient away from hazard sources (FR-11 R11.4).
+- :func:`compose` (step 1.11): Combine all enabled force terms into a single
+  acceleration array ready for the integrator (FR-14 R14.1).
 
 The crowd terms find neighbours through
 :class:`~crowd_evac.domain.spatial_hash.SpatialHash`; a caller may pass a
 pre-built hash (so the terms share one build per tick) or let each term build
-its own at the appropriate radius.
-
-Further terms — ``compose`` — will be added in step 1.11 to this same module
-without changing the integrator.
+its own at the appropriate radius.  :func:`compose` builds one shared hash at
+the largest radius required by the enabled crowd terms so only one index is
+constructed per tick.
 """
 from __future__ import annotations
 
@@ -384,4 +385,81 @@ def f_panic_repulsion(
 
     raw = panic_field.repulsion_at(state.pos[active])  # (A, 2)
     out[active] = strength * raw
+    return out
+
+
+def compose(
+    state: AgentState,
+    field: FlowField,
+    panic_field: PanicField,
+    *,
+    spatial_hash: SpatialHash | None = None,
+    enable_exit: bool = True,
+    enable_crowd: bool = True,
+    enable_density: bool = True,
+    enable_herd: bool = True,
+    enable_panic_repulsion: bool = True,
+) -> Vec2Array:
+    """Compose all enabled force terms into a single per-agent acceleration.
+
+    Sums the active force contributions into one ``(N, 2)`` array ready for
+    :func:`~crowd_evac.domain.integrator.step`::
+
+        a_i = f_exit + f_crowd + f_density + f_herd + f_panic_repulsion
+
+    Each term is independently togglable for debugging (R14.1 AC).  A single
+    :class:`~crowd_evac.domain.spatial_hash.SpatialHash` is built — or reused
+    from the caller — at the largest radius required by the enabled crowd
+    terms, so repulsion, density, and herd share one index build per tick.
+
+    Phase 4 signage and other future additive terms slot in here without
+    touching the integrator.
+
+    Args:
+        state: Current agent state (positions, velocities, panic, liveness).
+        field: Pre-computed flow field for exit-seeking direction.
+        panic_field: Aggregated panic field from active panic sources.
+        spatial_hash: Optional pre-built neighbour index whose
+            :attr:`~SpatialHash.cell_size` is at least the largest enabled
+            crowd-term radius.  When ``None``, one is built automatically.
+        enable_exit: Include the exit-seeking force (default ``True``).
+        enable_crowd: Include agent-agent repulsion (default ``True``).
+        enable_density: Include density-pressure deceleration (default ``True``).
+        enable_herd: Include herd alignment toward local mean velocity
+            (default ``True``).
+        enable_panic_repulsion: Include panic-gradient repulsion away from
+            hazard sources (default ``True``).
+
+    Returns:
+        Float64 array of shape ``(N, 2)`` with summed accelerations in m/s².
+        Dead agents receive zero rows regardless of enabled terms.
+    """
+    out: Vec2Array = np.zeros((state.count, 2), dtype=np.float64)
+
+    if enable_exit:
+        out = out + f_exit(state, field)
+
+    # Build one shared spatial hash for all crowd terms that need it.
+    sh: SpatialHash | None = spatial_hash
+    if sh is None:
+        _needed: list[float] = []
+        if enable_crowd:
+            _needed.append(REPULSION_RADIUS)
+        if enable_density:
+            _needed.append(DENSITY_SENSING_RADIUS)
+        if enable_herd:
+            _needed.append(HERD_PERCEPTION_RADIUS)
+        if _needed:
+            sh = SpatialHash.build(state, max(_needed))
+
+    if enable_crowd:
+        out = out + f_crowd(state, sh)
+    if enable_density:
+        out = out + f_density(state, sh)
+    if enable_herd:
+        out = out + f_herd(state, sh)
+
+    if enable_panic_repulsion:
+        out = out + f_panic_repulsion(state, panic_field)
+
     return out
