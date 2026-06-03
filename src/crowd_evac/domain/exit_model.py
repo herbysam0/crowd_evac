@@ -83,6 +83,8 @@ class ExitModel:
         self._tokens: list[float] = [0.0] * n
         self._evacuated: int = 0
         self._ticks_since_last_egress: int = 0
+        # Per-exit egress count from the most recent step() call.
+        self._last_per_exit: list[int] = [0] * n
         # Precomputed segment geometry for vectorised arrival queries.
         self._centres, self._half_widths, self._is_horiz = (
             _precompute_segments(floor_plan)
@@ -96,6 +98,16 @@ class ExitModel:
     def evacuated_count(self) -> int:
         """Total agents successfully egressed since this model was created."""
         return self._evacuated
+
+    @property
+    def last_egress_per_exit(self) -> tuple[int, ...]:
+        """Per-exit egress counts from the most recent :meth:`step` call.
+
+        Indices correspond to exits in
+        :attr:`~crowd_evac.domain.floor_plan.FloorPlan.exits`.  All zeroes
+        before the first :meth:`step` call.
+        """
+        return tuple(self._last_per_exit)
 
     @property
     def ticks_since_last_egress(self) -> int:
@@ -179,6 +191,8 @@ class ExitModel:
         """Drain exit queues up to token capacity; return total egressed."""
         total_egressed = 0
         to_remove: list[int] = []
+        # Reset per-exit counters so last_egress_per_exit reflects this tick.
+        self._last_per_exit = [0] * len(self.floor_plan.exits)
 
         for i, exit_ in enumerate(self.floor_plan.exits):
             cap = exit_.capacity_per_second
@@ -196,6 +210,7 @@ class ExitModel:
                     drained += 1
                 # Dead agents are discarded without consuming a capacity token.
             self._tokens[i] -= drained
+            self._last_per_exit[i] = drained
             total_egressed += drained
 
         if to_remove:

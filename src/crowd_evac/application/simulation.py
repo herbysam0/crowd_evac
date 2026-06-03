@@ -276,6 +276,7 @@ class Simulation:
             egressed=egressed,
             active=int(self.state.active_indices.size),
             evacuated=self.exit_model.evacuated_count,
+            per_exit_egress=list(self.exit_model.last_egress_per_exit),
         )
 
         if egressed > 0:
