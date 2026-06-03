@@ -295,6 +295,9 @@ vetted (Windows wheel, maintenance, license) in Step 1.1 before install.
 - **Tests:** threshold values land in a config/constants module with a unit test
   asserting they're loaded and in range; benchmark script runs headless+windowed.
 
+### 1.22 Case of no walls
+- **Do:** decide how to solve case of floorplan with no walls or not enclosed (eg 3 walls). Open walls should be treated as exits.
+
 ---
 
 ## Verification (end-to-end)

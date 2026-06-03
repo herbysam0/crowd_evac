@@ -30,3 +30,13 @@ class ScenarioValidationError(ScenarioError):
     """
 
     pass
+
+
+class PathfindingError(CrowdEvacError):
+    """Raised when a navigation field cannot be constructed.
+
+    Example: a floor plan whose exit cells are all non-walkable, leaving no
+    source for the flow-field solve.
+    """
+
+    pass
