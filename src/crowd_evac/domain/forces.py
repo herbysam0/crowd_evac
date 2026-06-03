@@ -14,14 +14,16 @@ Functions defined here:
   effective speed in dense regions (R2.2).
 - :func:`f_herd` (step 1.8): Panic-scaled alignment toward the mean velocity
   of nearby agents (R2.5).
+- :func:`f_panic_repulsion` (step 1.10): Panic-source repulsion pushing
+  agents down-gradient away from hazard sources (FR-11 R11.4).
 
 The crowd terms find neighbours through
 :class:`~crowd_evac.domain.spatial_hash.SpatialHash`; a caller may pass a
 pre-built hash (so the terms share one build per tick) or let each term build
 its own at the appropriate radius.
 
-Further terms — ``f_panic_repulsion``, ``compose`` — will be added in steps
-1.10–1.11 to this same module without changing the integrator.
+Further terms — ``compose`` — will be added in step 1.11 to this same module
+without changing the integrator.
 """
 from __future__ import annotations
 
@@ -38,12 +40,14 @@ from crowd_evac.domain.constants import (
     HERD_PERCEPTION_RADIUS,
     HIGH_DENSITY_THRESHOLD,
     MAX_SPEED,
+    PANIC_REPULSION_STRENGTH,
     PANIC_SPEED_MULTIPLIER,
     RELAXATION_TIME,
     REPULSION_MIN_DISTANCE,
     REPULSION_RADIUS,
     REPULSION_STRENGTH,
 )
+from crowd_evac.domain.panic_field import PanicField
 from crowd_evac.domain.spatial_hash import SpatialHash
 from crowd_evac.pathfinding.flow_field import FlowField
 
@@ -329,4 +333,55 @@ def f_herd(
     out[has_neighbours] = (
         strength * panic_h * (mean_vel - state.vel[has_neighbours])
     )
+    return out
+
+
+def f_panic_repulsion(
+    state: AgentState,
+    panic_field: PanicField,
+    *,
+    strength: float = PANIC_REPULSION_STRENGTH,
+) -> Vec2Array:
+    """Compute panic-gradient repulsion for all agents (FR-11 R11.4).
+
+    For each active agent within a panic source's influence radius, an
+    acceleration is applied in the direction *away* from that source,
+    proportional to the local panic field value::
+
+        a_i = strength * sum_s[ v_s(p_i) * (p_i − p_s) / ||p_i − p_s|| ]
+
+    where ``v_s(p_i)`` is the scalar field contribution from source ``s``
+    at position ``p_i`` (zero outside the source radius) and the direction
+    ``(p_i − p_s) / d`` points away from the source.
+
+    Dead agents (``alive[i] == False``) receive a zero row.  Agents whose
+    positions lie outside all active source radii also receive a zero row.
+
+    Args:
+        state: Current agent state (positions, liveness).
+        panic_field: Aggregated panic field from one or more
+            :class:`~crowd_evac.domain.panic_field.PanicField` sources.
+            Inactive sources (intensity at/below threshold) contribute
+            nothing.
+        strength: Repulsion acceleration scale in m/s².  Must be >= 0.
+
+    Returns:
+        Float64 array of shape ``(N, 2)`` of repulsion accelerations in
+        m/s².  Dead and out-of-range agents have zero rows.
+
+    Raises:
+        ValueError: If ``strength`` is negative.
+    """
+    if strength < 0.0:
+        raise ValueError(
+            f"strength must be non-negative, got {strength!r}"
+        )
+
+    out: Vec2Array = np.zeros((state.count, 2), dtype=np.float64)
+    active = state.active_indices
+    if active.size == 0:
+        return out
+
+    raw = panic_field.repulsion_at(state.pos[active])  # (A, 2)
+    out[active] = strength * raw
     return out

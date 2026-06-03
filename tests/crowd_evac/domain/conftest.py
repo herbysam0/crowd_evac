@@ -1,8 +1,9 @@
 """Shared fixtures for domain-layer tests.
 
-Provides a factory fixture for building :class:`AgentState` instances from
-plain Python lists or arrays, so individual tests request a builder rather
-than calling a module-level helper.
+Provides factory fixtures for building :class:`AgentState` and
+:class:`~crowd_evac.domain.panic_source.PanicSource` instances from plain
+Python values, so individual tests request a builder rather than calling a
+module-level helper.
 """
 from __future__ import annotations
 
@@ -13,9 +14,13 @@ import numpy.typing as npt
 import pytest
 
 from crowd_evac.domain.agent_state import AgentState
+from crowd_evac.domain.panic_source import PanicSource
 
 # A builder taking (pos, vel=None, panic=None, alive=None) -> AgentState.
 MakeState = Callable[..., AgentState]
+
+# A builder taking keyword overrides -> PanicSource (non-decaying by default).
+MakeSource = Callable[..., PanicSource]
 
 
 @pytest.fixture
@@ -66,6 +71,39 @@ def make_state() -> MakeState:
             panic=panic_arr,
             goal=np.full(n, -1, dtype=np.intp),
             alive=alive_arr,
+        )
+
+    return _make
+
+
+@pytest.fixture
+def make_source() -> MakeSource:
+    """Return a factory that builds a :class:`PanicSource` from keyword args.
+
+    Defaults: origin position, full intensity, ``PANIC_RANGE`` radius, and
+    ``decay_rate=0.0`` (non-decaying) so test assertions stay deterministic
+    unless the caller explicitly requests decay.
+
+    Returns:
+        A callable with signature
+        ``make(x=0.0, y=0.0, intensity=1.0, radius=10.0, decay_rate=0.0)``
+        returning a :class:`PanicSource`.
+    """
+
+    def _make(
+        x: float = 0.0,
+        y: float = 0.0,
+        intensity: float = 1.0,
+        radius: float = 10.0,
+        decay_rate: float = 0.0,
+    ) -> PanicSource:
+        """Build a PanicSource with sensible test defaults."""
+        return PanicSource(
+            x=x,
+            y=y,
+            intensity=intensity,
+            radius=radius,
+            decay_rate=decay_rate,
         )
 
     return _make
