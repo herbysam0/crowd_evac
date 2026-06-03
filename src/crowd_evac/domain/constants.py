@@ -94,6 +94,24 @@ GRID_CELL_SIZE: float = 0.25
 EXIT_CAPACITY_PER_SECOND: int = 5
 """Maximum agents passing through an exit per fixed timestep."""
 
+EXIT_CAPTURE_RADIUS: float = 1.0
+"""Distance from exit opening segment (metres) that triggers queue entry.
+
+Measured as perpendicular distance to the nearest point on the exit
+segment (not the centre), so wide exits capture approaching agents
+uniformly along their full lateral span.
+"""
+
+STALL_TICKS: int = 200
+"""Consecutive no-egress ticks before declaring the evacuation stalled.
+
+At the default DT of 0.05 s this equals 10 simulated seconds.  After this
+many consecutive ticks with zero egress the remaining alive agents are
+considered trapped and
+:func:`~crowd_evac.application.termination.is_evacuation_complete` returns
+``True`` (R5.3).
+"""
+
 # -- Rendering and visualization (FR-7) ------------------------------------
 
 PIXELS_PER_METER: float = 40.0
