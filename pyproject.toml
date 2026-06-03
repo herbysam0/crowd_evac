@@ -38,6 +38,9 @@ package-dir = {"" = "src"}
 [tool.setuptools.packages]
 find = {include = ["crowd_evac*"]}
 
+[tool.setuptools.package-data]
+crowd_evac = ["assets/scenarios/*.json"]
+
 [tool.mypy]
 strict = true
 python_version = "3.11"

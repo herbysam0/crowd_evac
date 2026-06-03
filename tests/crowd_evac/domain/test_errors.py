@@ -3,7 +3,12 @@ from __future__ import annotations
 
 import pytest
 
-from crowd_evac.domain.errors import CrowdEvacError
+from crowd_evac.domain.errors import (
+    CrowdEvacError,
+    MalformedScenarioError,
+    ScenarioError,
+    ScenarioValidationError,
+)
 
 
 class TestCrowdEvacError:
@@ -30,3 +35,43 @@ class TestCrowdEvacError:
         message = "Something went wrong in the simulation"
         error = CrowdEvacError(message)
         assert str(error) == message
+
+
+class TestScenarioErrors:
+    """Test suite for the scenario error hierarchy."""
+
+    # -- Happy path: hierarchy and catch-all --------------------------------
+
+    def test_scenario_error_is_crowd_evac_error(self) -> None:
+        """Verify ScenarioError is a CrowdEvacError subclass."""
+        assert issubclass(ScenarioError, CrowdEvacError)
+
+    def test_malformed_is_scenario_error(self) -> None:
+        """Verify MalformedScenarioError is a ScenarioError subclass."""
+        assert issubclass(MalformedScenarioError, ScenarioError)
+
+    def test_validation_is_scenario_error(self) -> None:
+        """Verify ScenarioValidationError is a ScenarioError subclass."""
+        assert issubclass(ScenarioValidationError, ScenarioError)
+
+    # -- Edge case: caught by parent type -----------------------------------
+
+    def test_malformed_caught_as_crowd_evac_error(self) -> None:
+        """Verify MalformedScenarioError is catchable as CrowdEvacError."""
+        with pytest.raises(CrowdEvacError):
+            raise MalformedScenarioError("bad json")
+
+    def test_validation_caught_as_scenario_error(self) -> None:
+        """Verify ScenarioValidationError is catchable as ScenarioError."""
+        with pytest.raises(ScenarioError):
+            raise ScenarioValidationError("negative width")
+
+    # -- Failure path: distinct types don't overlap -------------------------
+
+    def test_malformed_not_caught_as_validation_error(self) -> None:
+        """Verify MalformedScenarioError is NOT a ScenarioValidationError."""
+        assert not issubclass(MalformedScenarioError, ScenarioValidationError)
+
+    def test_validation_not_caught_as_malformed_error(self) -> None:
+        """Verify ScenarioValidationError is NOT a MalformedScenarioError."""
+        assert not issubclass(ScenarioValidationError, MalformedScenarioError)
