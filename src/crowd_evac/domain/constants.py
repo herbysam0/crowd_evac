@@ -24,6 +24,13 @@ PANIC_SPEED_MULTIPLIER: float = 1.3
 RELAXATION_TIME: float = 0.5
 """Characteristic time (s) for velocity relaxation in the exit-seeking force."""
 
+AGENT_RADIUS: float = 0.2
+"""Personal-space radius of a single agent in meters.
+
+Two agents are considered overlapping when their centre distance drops below
+``2 * AGENT_RADIUS``. Used by crowd-repulsion tuning and tests (FR-2 R2.1).
+"""
+
 # -- Spatial awareness (FR-2: crowd dynamics) --------------------------------
 
 REPULSION_RADIUS: float = 0.5
@@ -32,13 +39,36 @@ REPULSION_RADIUS: float = 0.5
 REPULSION_STRENGTH: float = 1.0
 """Scaling factor for short-range repulsion force magnitude."""
 
+REPULSION_MIN_DISTANCE: float = 0.05
+"""Distance floor (m) for the repulsion kernel, preventing division blow-up.
+
+Pair separations are clamped up to this value before the ``1/d`` repulsion
+term is evaluated, so the unclamped acceleration stays finite even when two
+agents are nearly coincident (the integrator clamps it to ``MAX_ACCEL``).
+"""
+
 # -- Density and flow (FR-2: throughput constraints) -------------------------
+
+DENSITY_SENSING_RADIUS: float = 1.0
+"""Radius (m) over which local crowd density is measured (R2.2).
+
+The density-pressure term counts neighbours within this radius and divides by
+the disc area to estimate agents per square metre.
+"""
 
 HIGH_DENSITY_THRESHOLD: float = 4.0
 """Agents per square meter above which density pressure applies."""
 
 DENSITY_PRESSURE_STRENGTH: float = 0.3
 """Scaling factor for density-based speed reduction."""
+
+HERD_PERCEPTION_RADIUS: float = 5.0
+"""Radius (m) over which an agent averages neighbour velocity for herding.
+
+Herd alignment (R2.5) draws an agent toward the mean velocity of everyone
+within this radius; it is deliberately much wider than the density and
+repulsion radii so panicked agents follow the broader crowd flow.
+"""
 
 HERD_ATTRACTION_STRENGTH: float = 0.1
 """Scaling factor for local velocity attraction (herd behavior)."""
