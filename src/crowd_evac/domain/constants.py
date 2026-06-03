@@ -21,6 +21,9 @@ MAX_ACCEL: float = 2.0
 PANIC_SPEED_MULTIPLIER: float = 1.3
 """Speed boost factor when panicked (panic * MAX_SPEED * multiplier)."""
 
+RELAXATION_TIME: float = 0.5
+"""Characteristic time (s) for velocity relaxation in the exit-seeking force."""
+
 # -- Spatial awareness (FR-2: crowd dynamics) --------------------------------
 
 REPULSION_RADIUS: float = 0.5
