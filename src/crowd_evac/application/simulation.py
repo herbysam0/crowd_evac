@@ -10,9 +10,11 @@ loop.  Each call to :meth:`Simulation.step` advances the simulation by one
    at their position (panic propagation).
 3. Compose all enabled force terms (``forces.compose``).
 4. Integrate velocities and positions (``integrator.step``).
-5. Resolve exits (``ExitModel.step``).
-6. Increment the monotonic tick counter.
-7. Append a ``"tick_advanced"`` event to the event log.
+5. Resolve collisions against static geometry so no agent crosses a wall or
+   obstacle (``CollisionMap.resolve``); skipped when no map is supplied.
+6. Resolve exits (``ExitModel.step``).
+7. Increment the monotonic tick counter.
+8. Append a ``"tick_advanced"`` event to the event log.
 
 A :meth:`~Simulation.snapshot` method returns a copy of the current state for
 rendering and metrics — calling it any number of times between ticks produces
@@ -37,6 +39,7 @@ from crowd_evac.application.termination import is_evacuation_complete
 from crowd_evac.domain import forces as _forces
 from crowd_evac.domain import integrator as _integrator
 from crowd_evac.domain.agent_state import AgentState, Bool1D, Float1D, Int1D, Vec2Array
+from crowd_evac.domain.collision import CollisionMap
 from crowd_evac.domain.constants import DT
 from crowd_evac.domain.exit_model import ExitModel
 from crowd_evac.domain.panic_field import PanicField
@@ -140,6 +143,8 @@ class Simulation:
         panic_field: Aggregate panic field.  Sources decay each tick.
         exit_model: Per-exit queue/token manager.  Drives egress.
         rng: Seeded generator threaded through for reproducibility.
+        collision_map: Static blocking grid enforcing that agents never cross
+            walls or obstacles, or ``None`` to disable the constraint.
     """
 
     def __init__(
@@ -150,6 +155,7 @@ class Simulation:
         exit_model: ExitModel,
         rng: SeededRNG,
         *,
+        collision_map: CollisionMap | None = None,
         enable_exit: bool = True,
         enable_crowd: bool = True,
         enable_density: bool = True,
@@ -166,6 +172,10 @@ class Simulation:
             exit_model: Exit capacity and queue manager bound to the same
                 floor plan as ``flow_field``.
             rng: Seeded random generator for any stochastic components.
+            collision_map: Static blocking grid built from the same floor plan;
+                when supplied, integrated positions are clamped each tick so
+                agents never enter a wall or obstacle cell.  ``None`` disables
+                collision resolution (force-only headless tests).
             enable_exit: Toggle exit-seeking force term (default ``True``).
             enable_crowd: Toggle agent-agent repulsion (default ``True``).
             enable_density: Toggle density-pressure deceleration
@@ -179,6 +189,7 @@ class Simulation:
         self.panic_field = panic_field
         self.exit_model = exit_model
         self.rng = rng
+        self._collision_map = collision_map
 
         self._enable_exit = enable_exit
         self._enable_crowd = enable_crowd
@@ -226,9 +237,11 @@ class Simulation:
            at least the field value at each agent's position).
         3. Compose all enabled force terms into per-agent acceleration.
         4. Integrate velocities and positions (semi-implicit Euler).
-        5. Resolve exits: enqueue arrivals, drain queues to token capacity.
-        6. Increment the monotonic tick counter.
-        7. Append a ``"tick_advanced"`` event to the event log, stamped
+        5. Resolve collisions: clamp integrated positions so no agent crosses
+           a wall or obstacle (skipped when no collision map is set).
+        6. Resolve exits: enqueue arrivals, drain queues to token capacity.
+        7. Increment the monotonic tick counter.
+        8. Append a ``"tick_advanced"`` event to the event log, stamped
            at the new tick value.
 
         Returns:
@@ -262,12 +275,17 @@ class Simulation:
         )
 
         # 4. Semi-implicit Euler: update velocities then positions
+        prev_pos = self.state.pos.copy()
         _integrator.step(self.state, accel)
 
-        # 5. Resolve exits: enqueue arrivals, drain to capacity
+        # 5. Reject any move that would cross a wall or obstacle (R1.4 / FR-3)
+        if self._collision_map is not None:
+            self._collision_map.resolve(self.state, prev_pos)
+
+        # 6. Resolve exits: enqueue arrivals, drain to capacity
         egressed = self.exit_model.step(self.state)
 
-        # 6. Advance tick (now represents "this step has completed")
+        # 7. Advance tick (now represents "this step has completed")
         self._tick += 1
 
         # 7. Stamp tick event at the new tick value

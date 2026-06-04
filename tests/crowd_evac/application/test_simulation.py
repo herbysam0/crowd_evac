@@ -20,9 +20,10 @@ import pytest
 from crowd_evac.application.rng import SeededRNG
 from crowd_evac.application.simulation import SimEvent, SimSnapshot, Simulation
 from crowd_evac.domain.agent_state import AgentState, spawn
+from crowd_evac.domain.collision import CollisionMap
 from crowd_evac.domain.constants import DT
 from crowd_evac.domain.exit_model import ExitModel
-from crowd_evac.domain.floor_plan import Exit, ExitSide, FloorPlan
+from crowd_evac.domain.floor_plan import Exit, ExitSide, FloorPlan, Obstacle
 from crowd_evac.domain.panic_field import PanicField
 from crowd_evac.domain.panic_source import PanicSource
 from crowd_evac.pathfinding.flow_field import FlowField
@@ -69,6 +70,7 @@ def _build_sim(
     seed: int = _SEED,
     n_agents: int = _N_AGENTS,
     panic_field: PanicField | None = None,
+    collision_map: CollisionMap | None = None,
 ) -> Simulation:
     """Construct a fully-wired Simulation from floor and flow fixtures."""
     rng = SeededRNG(seed)
@@ -79,6 +81,7 @@ def _build_sim(
         panic_field=panic_field if panic_field is not None else PanicField(),
         exit_model=ExitModel(floor),
         rng=rng,
+        collision_map=collision_map,
     )
 
 
@@ -414,3 +417,90 @@ class TestPanicPropagation:
         active = sim_clean.state.active_indices
         if active.size > 0:
             assert np.all(sim_clean.state.panic[active] == 0.0)
+
+
+# ---------------------------------------------------------------------------
+# Collision constraint (step 1.19a item 1) — obstacles are never crossed
+# ---------------------------------------------------------------------------
+
+
+class TestCollisionConstraint:
+    """A wired collision map keeps every agent out of wall/obstacle cells."""
+
+    @pytest.fixture
+    def obstacle_floor(self) -> FloorPlan:
+        """10 m x 6 m room split by a near-full-height obstacle wall.
+
+        The obstacle spans x in [4.5, 5.5] and y in [0, 4.5], leaving a 1.5 m
+        gap at the top, so west-side agents must route around it to reach the
+        east exit rather than walking straight through.
+        """
+        return FloorPlan(
+            width_m=10.0,
+            height_m=6.0,
+            walls=(),
+            obstacles=(Obstacle(x=4.5, y=0.0, width=1.0, height=4.5),),
+            exits=(
+                Exit(
+                    x=10.0,
+                    y=3.0,
+                    width_m=2.0,
+                    side=ExitSide.EAST,
+                    capacity_per_second=10,
+                    label="east",
+                ),
+            ),
+        )
+
+    def test_agents_never_occupy_blocked_cell(
+        self, obstacle_floor: FloorPlan
+    ) -> None:
+        """Across the full run no active agent ever lands in a blocked cell.
+
+        Steps the simulation until evacuation completes (or a tick ceiling),
+        checking the invariant before the first step and after every step.
+        """
+        flow = FlowField.build(obstacle_floor)
+        cmap = CollisionMap.from_floor_plan(obstacle_floor)
+        sim = _build_sim(
+            obstacle_floor, flow, n_agents=40, collision_map=cmap
+        )
+
+        def _assert_all_clear() -> None:
+            snap = sim.snapshot()
+            alive_pos = snap.positions[snap.alive]
+            if alive_pos.shape[0] > 0:
+                assert not np.any(cmap.is_blocked(alive_pos))
+
+        _assert_all_clear()
+        for _ in range(400):
+            if sim.is_complete:
+                break
+            sim.step()
+            _assert_all_clear()
+
+    def test_without_map_agents_can_enter_obstacle(
+        self, obstacle_floor: FloorPlan
+    ) -> None:
+        """Control: with no collision map the constraint is absent.
+
+        Confirms the obstacle floor and exit pull agents *through* the
+        obstacle region when collision resolution is disabled, so the
+        passing :meth:`test_agents_never_occupy_blocked_cell` is attributable
+        to the collision map and not to the geometry trivially avoiding it.
+        """
+        flow = FlowField.build(obstacle_floor)
+        cmap = CollisionMap.from_floor_plan(obstacle_floor)
+        sim = _build_sim(obstacle_floor, flow, n_agents=40, seed=1)
+
+        entered_block = False
+        for _ in range(400):
+            if sim.is_complete:
+                break
+            sim.step()
+            snap = sim.snapshot()
+            alive_pos = snap.positions[snap.alive]
+            if alive_pos.shape[0] > 0 and np.any(cmap.is_blocked(alive_pos)):
+                entered_block = True
+                break
+        assert entered_block

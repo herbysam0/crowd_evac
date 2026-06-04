@@ -278,6 +278,18 @@ vetted (Windows wheel, maintenance, license) in Step 1.1 before install.
 - **Tests:** headless launch path builds a simulation from the default scenario
   without a window (renderer port mocked); starts at tick 0 with agents in range.
 
+### 1.19a Bugfix after first App entry point
+- **Fix:** agents are able to cross obstacles. Obstacles should NEVER be crossed.
+- **Add:** simulation should begin paused. Add "Evacuate" button to initiate the exit.
+- **Add:** the "Evacuate" button change to "Pause", further pressing "Pause" pauses the app and button change "Continue", and can go back to pause etc.
+- **Add:** after evacuation is complete the button change to "Reset", pressing it resets the scenario and back to pause.
+- **Add:** emergency sources should also include an icon at the position of the emergency source, shaped like the event type.
+- **Fix:** entire area including all walls MUST be visible on the screen..
+- **Modify:** emergency 1nfluence area should be more transparent.
+- **Modify:** agent symbol size should be proportional to pixel per meter, showing diameter of 40 cm.
+- **Fix:** the speed of the events seems not aligned to real time. Explore that and give insights.
+- **Add:** velocity slider, from x0.1 to X3, with snap to x1.
+
 ### 1.20 Headless end-to-end + seed-repro tests — Sonnet
 - **Do:** `tests/e2e/` — run the default scenario headless to evacuation-complete;
   assert evacuated == initial evacuable (R5.3); same seed twice → recognizably
