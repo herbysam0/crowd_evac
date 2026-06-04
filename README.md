@@ -76,6 +76,85 @@ pytest tests/ -v      # Run all tests
 pytest tests/ --cov=src --cov-branch --cov-report=term-missing  # Coverage report
 ```
 
+### Performance Testing
+
+The project has two performance benchmarks targeting the simulation loop.
+
+#### Headless load test (no display required)
+
+Runs the full 7-step pipeline (force composition, integration, exit
+resolution) for a range of agent counts and prints a timing table:
+
+```powershell
+pytest tests/ -m perf -v -s
+```
+
+The `-s` flag passes stdout through so the timing table prints to the console.
+Performance tests are excluded from the default `pytest` run to keep CI fast.
+
+**Sample output:**
+
+```
+  agents   ticks   mean ms    min ms    p99 ms    max ms    ticks/s  agent·ticks/s
+--------  ------  --------  --------  --------  --------  ---------  --------------
+     100     200     0.xxx     0.xxx     0.xxx     0.xxx      x,xxx       x,xxx,xxx
+     500     200     0.xxx     0.xxx     0.xxx     0.xxx      x,xxx       x,xxx,xxx
+   1,000     200     0.xxx     0.xxx     0.xxx     0.xxx      x,xxx       x,xxx,xxx
+   2,000     200     0.xxx     0.xxx     0.xxx     0.xxx      x,xxx       x,xxx,xxx
+   5,000     200     0.xxx     0.xxx     0.xxx     0.xxx      x,xxx       x,xxx,xxx
+```
+
+Floor: 30 m × 30 m open room, single east exit, 5 force terms enabled,
+seed 42. Run on the target machine and record results in a performance log.
+
+#### Simulation + render load test (requires display)
+
+Opens an arcade window, runs `Simulation.step()` + sprite rendering each
+frame, and reports sim-step cost and draw cost separately:
+
+```powershell
+python scripts/bench_sim_render.py --agents 500
+python scripts/bench_sim_render.py --agents 1000 --frames 300
+```
+
+**Sample output:**
+
+```
+sim + render benchmark @ 500 agents
+  frames timed      :      300
+  --- sim step (step() + snapshot()) ---
+  mean step ms      :    x.xxx
+  p99  step ms      :    x.xxx
+  --- arcade draw (sprite pos update + draw call) ---
+  mean draw ms      :    x.xxx
+  p99  draw ms      :    x.xxx
+  --- combined frame ---
+  mean frame ms     :    x.xxx
+  p99  frame ms     :    x.xxx
+  mean FPS          :    xxx.x
+  1% low FPS        :    xxx.x
+```
+
+The render spike (`python scripts/bench_render.py`) remains available
+to isolate pure arcade rendering cost with no simulation logic.
+
+#### Adding load tests
+
+**Any change to code on the critical path must update the performance
+tests.** Critical path includes:
+
+- `domain/forces.py` — force composition, spatial hash
+- `domain/integrator.py` — semi-implicit Euler
+- `domain/exit_model.py` — exit queuing and egress
+- `domain/spatial_hash.py` — neighbour queries
+- `application/simulation.py` — step pipeline orchestration
+- `pathfinding/flow_field.py` — flow field sampling
+
+For changes to these modules, either add a new parametrize case to
+`tests/crowd_evac/performance/test_perf_headless.py`, add a targeted
+test isolating the changed subsystem, or add a comment explaining why
+the change does not affect per-tick cost.
+
 ### Architecture
 
 Built on clean-architecture patterns:

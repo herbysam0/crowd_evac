@@ -378,3 +378,58 @@ python -m crowd_evac
   stays.
 - Step 1.21 sim+render FPS @ 2k / 10k, re-route latency, footprint: _TBD_
 - §8 EB-1..6 empirical thresholds: _TBD_
+
+## Profiling Guide
+
+Use this sequence to locate per-tick bottlenecks once the load tests
+(`pytest -m perf -v -s`) establish a baseline or flag a regression.
+
+### Step 1 — `cProfile` + `snakeviz` (identify the dominant call)
+
+No new dependencies for profiling; install `snakeviz` only for the browser
+visualisation.
+
+```powershell
+pip install snakeviz
+python -m cProfile -o prof.out scripts/bench_sim_headless.py --agents 2000 --ticks 100
+snakeviz prof.out
+```
+
+Opens an interactive sunburst in the browser.  Cumulative time per call
+immediately shows which function owns the budget.  The usual suspects are
+`forces.compose`, `spatial_hash.build`, and `_propagate_panic`.
+
+### Step 2 — `line_profiler` (line-by-line inside a suspect function)
+
+Once `cProfile` identifies the dominant function, install `line_profiler`,
+decorate that function temporarily with `@profile`, and run:
+
+```powershell
+pip install line-profiler
+kernprof -l -v scripts/bench_sim_headless.py --agents 2000 --ticks 50
+```
+
+Outputs microsecond-level time per line.  Essential for NumPy-heavy code
+where a single vectorised expression may account for 80% of a function's
+runtime.
+
+### Step 3 — `py-spy` flame graph (zero-code-change validation)
+
+Requires no decorators or code changes.  Run the benchmark as a subprocess
+and sample the live call stack:
+
+```powershell
+pip install py-spy
+py-spy record -o profile.svg -- python scripts/bench_sim_headless.py --agents 2000 --ticks 200
+```
+
+Produces a flame graph SVG.  Useful for confirming that an optimisation
+actually moved wall time, or for profiling a run that is hard to annotate
+(e.g., the arcade render loop inside `bench_sim_render.py`).
+
+### Recommended order
+
+1. Run `cProfile` — free, zero setup, narrows to the top 3 functions.
+2. Apply `line_profiler` to whichever of `forces.py`, `spatial_hash.py`,
+   or `integrator.py` appears at the top.
+3. Use `py-spy` to validate before/after when the change is non-trivial.

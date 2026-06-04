@@ -71,6 +71,9 @@ minversion = "7.0"
 testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
 addopts = "-v --tb=short"
+markers = [
+    "perf: performance / load tests — excluded from CI by default (run with -m perf)",
+]
 filterwarnings = [
     # Third-party (pyglet, pulled in by arcade) uses a CPython API deprecated
     # for removal in 3.19. Not our code and not fixable here; ignore only this
