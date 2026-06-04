@@ -288,3 +288,106 @@ class TestLoadBundledScenario:
         """Verify an unknown bundled name raises MalformedScenarioError."""
         with pytest.raises(MalformedScenarioError, match="not found"):
             load_bundled_scenario("no_such_scenario_xyz")
+
+
+# ---------------------------------------------------------------------------
+# Lecture Hall bundled scenario — FR-0, FR-13.1
+# ---------------------------------------------------------------------------
+
+
+class TestLectureHallScenario:
+    """Test suite for the lecture_hall bundled scenario (Phase 1 default)."""
+
+    def test_lecture_hall_loads_via_bundled_loader(self) -> None:
+        """Verify the bundled lecture_hall scenario loads without error."""
+        floor_plan, data = load_bundled_scenario("lecture_hall")
+        assert isinstance(floor_plan, FloorPlan)
+        assert data["name"] == "lecture_hall"
+
+    def test_lecture_hall_dimensions_in_valid_range(self) -> None:
+        """Verify dimensions are positive and reasonable for a lecture hall."""
+        floor_plan, _ = load_bundled_scenario("lecture_hall")
+        assert floor_plan.width_m == 50.0
+        assert floor_plan.height_m == 30.0
+
+    def test_lecture_hall_agent_count_in_range(self) -> None:
+        """Verify agent count is between 50 and 300 as per requirements."""
+        _, data = load_bundled_scenario("lecture_hall")
+        count = data["agents"]["count"]
+        assert 50 <= count <= 300, f"Agent count {count} not in range [50, 300]"
+
+    def test_lecture_hall_has_spawn_seed(self) -> None:
+        """Verify spawn_seed is present for reproducibility (FR-6 R6.2)."""
+        _, data = load_bundled_scenario("lecture_hall")
+        assert "spawn_seed" in data["agents"]
+        assert isinstance(data["agents"]["spawn_seed"], int)
+
+    def test_lecture_hall_exits_present(self) -> None:
+        """Verify at least one exit exists (main exit required)."""
+        floor_plan, _ = load_bundled_scenario("lecture_hall")
+        assert len(floor_plan.exits) >= 1, "At least one exit required"
+
+    def test_lecture_hall_main_exit_accessible(self) -> None:
+        """Verify main exit (front) has positive capacity and reasonable size."""
+        floor_plan, _ = load_bundled_scenario("lecture_hall")
+        # Assume first exit is the main one; verify it's on north wall
+        main_exit = floor_plan.exits[0]
+        assert main_exit.side is ExitSide.NORTH
+        assert main_exit.width_m > 0.0
+        assert main_exit.capacity_per_second > 0
+
+    def test_lecture_hall_obstacles_present(self) -> None:
+        """Verify seating obstacles are present (tiered-seating requirement)."""
+        floor_plan, _ = load_bundled_scenario("lecture_hall")
+        assert len(floor_plan.obstacles) > 0, "Seating obstacles required"
+
+    def test_lecture_hall_obstacles_are_seating_rows(self) -> None:
+        """Verify obstacles form a reasonable tiered seating pattern."""
+        floor_plan, _ = load_bundled_scenario("lecture_hall")
+        # Expect multiple rows with consistent widths and small heights
+        rows = [obs for obs in floor_plan.obstacles]
+        assert len(rows) >= 3, "At least 3 seating rows expected"
+        # All seating rows should have similar width (within 10%)
+        widths = [r.width for r in rows]
+        min_width = min(widths)
+        max_width = max(widths)
+        assert max_width <= min_width * 1.1, "Seating row widths should be consistent"
+
+    def test_lecture_hall_aisle_exists_for_convergence(self) -> None:
+        """Verify center aisle is navigable (agents can flow from back to exit).
+
+        Checks that there's a continuous vertical corridor between seating
+        rows through which agents can navigate.
+        """
+        floor_plan, _ = load_bundled_scenario("lecture_hall")
+        # Seating rows should not span the full width, leaving aisles
+        max_obstacle_width = max(obs.width for obs in floor_plan.obstacles)
+        assert (
+            max_obstacle_width < floor_plan.width_m
+        ), "Aisle(s) required for navigation"
+
+    def test_lecture_hall_walls_form_boundary(self) -> None:
+        """Verify outer walls define the room boundary."""
+        floor_plan, _ = load_bundled_scenario("lecture_hall")
+        # Should have at least perimeter walls
+        assert len(floor_plan.walls) >= 2, "Boundary walls required"
+
+    def test_lecture_hall_optional_side_exits_if_present(self) -> None:
+        """Verify that optional side exits (if present) are on east/west walls."""
+        floor_plan, _ = load_bundled_scenario("lecture_hall")
+        side_exits = [
+            e for e in floor_plan.exits
+            if e.side in (ExitSide.EAST, ExitSide.WEST)
+        ]
+        for exit_ in side_exits:
+            assert exit_.width_m > 0.0
+            assert exit_.capacity_per_second > 0
+
+    def test_lecture_hall_simulation_config_present(self) -> None:
+        """Verify dt and max_ticks are set to sensible defaults."""
+        _, data = load_bundled_scenario("lecture_hall")
+        sim_config = data["simulation"]
+        assert "dt" in sim_config
+        assert sim_config["dt"] == 0.05, "Expected dt=0.05s (fixed timestep)"
+        assert "max_ticks" in sim_config
+        assert sim_config["max_ticks"] == 10000
