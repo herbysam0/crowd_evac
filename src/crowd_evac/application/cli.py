@@ -18,7 +18,7 @@ import arcade
 
 from crowd_evac.adapters.io.scenario_loader import load_bundled_scenario
 from crowd_evac.adapters.render.arcade_input import ArcadeInputSource
-from crowd_evac.adapters.render.arcade_renderer import AGENT_RADIUS_PX, ArcadeRenderer
+from crowd_evac.adapters.render.arcade_renderer import ArcadeRenderer
 from crowd_evac.application.injection import process_input_events
 from crowd_evac.application.rng import SeededRNG
 from crowd_evac.application.simulation import Simulation
@@ -223,30 +223,23 @@ class EvacWindow(arcade.Window):
             floor_plan: Provides physical dimensions and geometry.
         """
         ppm = compute_fit_ppm(floor_plan)
-        # Scale agent radius proportionally so it stays visually consistent when
-        # ppm is reduced to fit the floor plan on screen.
-        agent_radius_px = max(2, round(AGENT_RADIUS_PX * ppm / PIXELS_PER_METER))
         width_px = int(floor_plan.width_m * ppm)
         height_px = int(floor_plan.height_m * ppm)
         super().__init__(width_px, height_px, WINDOW_TITLE)
         self._sim = sim
-        self._renderer = ArcadeRenderer(
-            floor_plan,
-            pixels_per_meter=ppm,
-            agent_radius_px=agent_radius_px,
-        )
+        # Agent visual size is now proportional to pixels_per_meter, so it
+        # automatically scales when ppm is adjusted to fit the floor plan on screen
+        self._renderer = ArcadeRenderer(floor_plan, pixels_per_meter=ppm)
         self._input_source = ArcadeInputSource()
         self._input_source.register(self)
         self._current_source: PanicSource | None = None
         logger.info(
-            "EvacWindow opened: %d×%d px at %.2f px/m (%.1f×%.1f m), "
-            "agent_radius=%d px.",
+            "EvacWindow opened: %d×%d px at %.2f px/m (%.1f×%.1f m).",
             width_px,
             height_px,
             ppm,
             floor_plan.width_m,
             floor_plan.height_m,
-            agent_radius_px,
         )
 
     def on_update(self, delta_time: float) -> None:

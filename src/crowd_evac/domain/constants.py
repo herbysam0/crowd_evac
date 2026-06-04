@@ -24,7 +24,7 @@ PANIC_SPEED_MULTIPLIER: float = 1.3
 RELAXATION_TIME: float = 0.5
 """Characteristic time (s) for velocity relaxation in the exit-seeking force."""
 
-AGENT_RADIUS: float = 0.2
+AGENT_RADIUS: float = 0.55
 """Personal-space radius of a single agent in meters.
 
 Two agents are considered overlapping when their centre distance drops below

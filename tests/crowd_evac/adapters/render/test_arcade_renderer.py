@@ -22,13 +22,13 @@ import numpy.testing as npt
 import pytest
 
 from crowd_evac.adapters.render.arcade_renderer import (
-    AGENT_RADIUS_PX,
     CALM_COLOR,
     PANIC_COLOR,
     AgentDrawItem,
     ArcadeRenderer,
     build_agent_render_items,
 )
+from crowd_evac.domain.constants import AGENT_RADIUS
 from crowd_evac.application.simulation import SimSnapshot
 from crowd_evac.domain.floor_plan import Exit, ExitSide, FloorPlan
 
@@ -159,10 +159,12 @@ class TestBuildAgentRenderItems:
     def test_custom_radius_propagated_to_items(
         self, make_snapshot: MakeSnapshot
     ) -> None:
-        """Custom agent_radius_px is reflected in every item."""
+        """Custom agent_radius_m is reflected in every item (converted to pixels)."""
         snap = make_snapshot(n_agents=3)
-        items = build_agent_render_items(snap, agent_radius_px=7)
-        assert all(item.radius_px == 7 for item in items)
+        ppm = 40.0
+        agent_radius_m = 0.25  # 0.25 m * 40 ppm = 10 px
+        items = build_agent_render_items(snap, pixels_per_meter=ppm, agent_radius_m=agent_radius_m)
+        assert all(item.radius_px == 10 for item in items)
 
     # -- Edge cases --------------------------------------------------------
 
@@ -310,12 +312,14 @@ class TestArcadeRendererHeadless:
         renderer = ArcadeRenderer(floor_plan, headless=True, pixels_per_meter=80.0)
         assert renderer._ppm == 80.0  # noqa: SLF001
 
-    def test_default_agent_radius_matches_constant(
+    def test_default_agent_radius_computed_from_meters(
         self, floor_plan: FloorPlan
     ) -> None:
-        """Default agent_radius_px must equal the module constant."""
+        """Default agent_radius_px is computed as agent_radius_m * pixels_per_meter."""
         renderer = ArcadeRenderer(floor_plan, headless=True)
-        assert renderer._agent_radius_px == AGENT_RADIUS_PX  # noqa: SLF001
+        # Default: AGENT_RADIUS (0.2 m) * PIXELS_PER_METER (40 px/m) = 8 px
+        expected_px = int(round(AGENT_RADIUS * 40.0))
+        assert renderer._agent_radius_px == expected_px  # noqa: SLF001
 
     def test_render_called_multiple_times_does_not_raise(
         self, floor_plan: FloorPlan, make_snapshot: MakeSnapshot

@@ -43,7 +43,7 @@ from typing import TYPE_CHECKING
 import arcade
 from arcade.types import RGBA255
 
-from crowd_evac.domain.constants import PIXELS_PER_METER
+from crowd_evac.domain.constants import AGENT_RADIUS, PIXELS_PER_METER
 from crowd_evac.domain.floor_plan import ExitSide, FloorPlan
 from crowd_evac.domain.panic_source import PanicSource
 
@@ -55,9 +55,6 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Rendering constants
 # ---------------------------------------------------------------------------
-
-AGENT_RADIUS_PX: int = 4
-"""Default agent sprite radius in pixels."""
 
 EXIT_DEPTH_M: float = 0.5
 """Depth of the exit-opening rectangle drawn perpendicular to the wall (m)."""
@@ -134,7 +131,7 @@ def _interpolate_color(c0: RGBA255, c1: RGBA255, t: float) -> RGBA255:
 def build_agent_render_items(
     snapshot: SimSnapshot,
     pixels_per_meter: float = PIXELS_PER_METER,
-    agent_radius_px: int = AGENT_RADIUS_PX,
+    agent_radius_m: float = AGENT_RADIUS,
 ) -> list[AgentDrawItem]:
     """Map alive agents from a snapshot to pixel-space render items.
 
@@ -145,10 +142,15 @@ def build_agent_render_items(
 
     The snapshot is never mutated; this function only reads from it.
 
+    Agent radius in pixels is computed as ``agent_radius_m * pixels_per_meter``,
+    so visual size scales with the rendering scale factor and matches the
+    agent's physical size (0.2 m = 40 cm diameter).
+
     Args:
         snapshot: Read-only simulation state at the current tick.
         pixels_per_meter: World-to-pixel scale factor.
-        agent_radius_px: Circle sprite radius in pixels for all agents.
+        agent_radius_m: Agent radius in metres. Pixel radius is computed as
+            ``agent_radius_m * pixels_per_meter``.
 
     Returns:
         List of :class:`AgentDrawItem` instances, one per alive agent.
@@ -162,6 +164,7 @@ def build_agent_render_items(
     positions = snapshot.positions
     panics = snapshot.panics
     alive = snapshot.alive
+    agent_radius_px = int(round(agent_radius_m * pixels_per_meter))
 
     for i in range(len(alive)):
         if not alive[i]:
@@ -213,9 +216,11 @@ class ArcadeRenderer:
 
     Agent sprites are managed as an :class:`~arcade.SpriteList` of
     :class:`~arcade.SpriteCircle` instances — the same batch-draw path
-    validated to ≥ 30 FPS at 10k agents by the Step 1.3 spike.  Alive agents
-    are colour-coded by panic level (calm = blue → panicked = red); dead /
-    egressed agents are hidden by setting ``visible = False``.
+    validated to ≥ 30 FPS at 10k agents by the Step 1.3 spike.  Agent visual
+    size is proportional to the rendering scale (``pixels_per_meter``), so it
+    always displays at the agent's physical radius (0.2 m = 40 cm diameter).
+    Alive agents are colour-coded by panic level (calm = blue → panicked = red);
+    dead / egressed agents are hidden by setting ``visible = False``.
 
     Geometry (floor, walls, obstacles, exits) is drawn using arcade's
     immediate-mode draw calls on every frame.  The geometry is static over a
@@ -233,7 +238,8 @@ class ArcadeRenderer:
             reference; the renderer reads it on every :meth:`render` call but
             never mutates it.
         pixels_per_meter: World-to-pixel scale factor (default 40 px/m).
-        agent_radius_px: Circle sprite radius for agents in pixels.
+        agent_radius_m: Agent radius in metres (default 0.2 m = 40 cm diameter).
+            Pixel radius is computed as ``agent_radius_m * pixels_per_meter``.
         background_image: Optional filesystem path to a background image
             (R7.1).  Loaded once at GL init; silently skipped on load failure.
         headless: If ``True``, skip all GL operations. For testing only.
@@ -248,13 +254,14 @@ class ArcadeRenderer:
         floor_plan: FloorPlan,
         *,
         pixels_per_meter: float = PIXELS_PER_METER,
-        agent_radius_px: int = AGENT_RADIUS_PX,
+        agent_radius_m: float = AGENT_RADIUS,
         background_image: str | None = None,
         headless: bool = False,
     ) -> None:
         self.floor_plan = floor_plan
         self._ppm = pixels_per_meter
-        self._agent_radius_px = agent_radius_px
+        self._agent_radius_m = agent_radius_m
+        self._agent_radius_px = int(round(agent_radius_m * pixels_per_meter))
         self._background_image = background_image
         self._headless = headless
 
@@ -269,9 +276,11 @@ class ArcadeRenderer:
             self._init_gl()
 
         logger.debug(
-            "ArcadeRenderer constructed (headless=%s, ppm=%.1f, floor=%.1f×%.1f m).",
+            "ArcadeRenderer constructed (headless=%s, ppm=%.1f, agent_radius=%.2f m (%.1f px), floor=%.1f×%.1f m).",
             headless,
             pixels_per_meter,
+            agent_radius_m,
+            self._agent_radius_px,
             floor_plan.width_m,
             floor_plan.height_m,
         )
@@ -320,7 +329,7 @@ class ArcadeRenderer:
                 never mutates any field or array within the snapshot.
         """
         # Pure computation path — exercised even headless so it remains testable
-        build_agent_render_items(snapshot, self._ppm, self._agent_radius_px)
+        build_agent_render_items(snapshot, self._ppm, self._agent_radius_m)
 
         if self._headless:
             return
