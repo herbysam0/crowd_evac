@@ -294,6 +294,8 @@ vetted (Windows wheel, maintenance, license) in Step 1.1 before install.
 - **Explore:** during emergencies some agents don't move, even though they are not blocked.
 - **Explore:** during emergencies some agents stay in queue when another exit is free nearby.
 - **Fix:** mismatch between mouse click position and emergency spawn.
+- **Add:** place symbol of the emergency type in its position, size configurable per type, eg fire symbil size 3 meter.
+
 
 
 ### 1.20 Headless end-to-end + seed-repro tests — Sonnet

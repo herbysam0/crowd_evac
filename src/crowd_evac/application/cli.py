@@ -230,7 +230,9 @@ class EvacWindow(arcade.Window):
         # Agent visual size is now proportional to pixels_per_meter, so it
         # automatically scales when ppm is adjusted to fit the floor plan on screen
         self._renderer = ArcadeRenderer(floor_plan, pixels_per_meter=ppm)
-        self._input_source = ArcadeInputSource()
+        # pixels_per_meter must match the renderer so that mouse-click pixel
+        # coordinates convert to the same world space that the renderer uses.
+        self._input_source = ArcadeInputSource(pixels_per_meter=ppm)
         self._input_source.register(self)
         self._current_source: PanicSource | None = None
         logger.info(

@@ -9,6 +9,8 @@ Covers:
   - :func:`compute_fit_ppm` caps at default_ppm when floor plan fits.
   - :func:`compute_fit_ppm` scales down when floor plan exceeds the screen.
   - :func:`compute_fit_ppm` falls back to default_ppm when display is unavailable.
+  - :class:`EvacWindow` input source ppm matches renderer ppm (regression: DPI / fit-ppm mismatch).
+  - :class:`EvacWindow` coordinate round-trip is consistent at scaled ppm.
 
 All tests run headless — no arcade window is opened.  :class:`EvacWindow`
 tests that require a display are marked ``@pytest.mark.render``.
@@ -22,6 +24,7 @@ from pytest_mock import MockerFixture
 
 from crowd_evac.application.cli import (
     DEFAULT_SCENARIO,
+    EvacWindow,
     _MIN_PPM,
     _SCREEN_MARGIN,
     _get_logical_screen_size,
@@ -250,3 +253,71 @@ class TestDefaultScenarioConstant:
         assert sim.tick == 0
         assert floor_plan.width_m > 0.0
         assert floor_plan.height_m > 0.0
+
+
+class TestEvacWindowPpmConsistency:
+    """Regression tests for mouse-click / spawn position mismatch (step 1.19a item 14).
+
+    The bug: ArcadeInputSource was constructed with the default PIXELS_PER_METER
+    (40.0) while ArcadeRenderer received the fit-computed ppm (e.g. 32.4 on a
+    1080p screen for the 50×30 m Lecture Hall).  Every click was divided by 40.0
+    but rendered positions were drawn at 32.4 px/m, causing a systematic offset.
+
+    These tests run headless by mocking out all GL-dependent objects.
+    """
+
+    def test_input_source_ppm_matches_renderer_ppm(
+        self, mocker: MockerFixture
+    ) -> None:
+        """EvacWindow must give the input source and renderer the same ppm.
+
+        A non-default ppm (25.0 ≠ 40.0) is forced via compute_fit_ppm mock so
+        that any hardcoded default would trigger an assertion failure.
+        """
+        scaled_ppm = 25.0
+        mocker.patch(
+            "crowd_evac.application.cli.compute_fit_ppm",
+            return_value=scaled_ppm,
+        )
+        # Avoid GL context — replace the renderer class entirely.
+        mocker.patch("crowd_evac.application.cli.ArcadeRenderer")
+        # Avoid arcade Window constructor (requires display).
+        mocker.patch("arcade.Window.__init__", return_value=None)
+
+        sim, floor_plan = build_simulation_from_scenario()
+        window = EvacWindow(sim, floor_plan)
+
+        assert window._input_source.pixels_per_meter == pytest.approx(scaled_ppm)
+
+    def test_coordinate_round_trip_at_scaled_ppm(
+        self, mocker: MockerFixture
+    ) -> None:
+        """Click pixel / ppm == rendered world position at any fit ppm.
+
+        Verifies end-to-end: a click at pixel (px, py) with the same ppm used
+        for rendering produces world coords that map back to (px, py) when
+        re-multiplied by ppm.  This is the invariant broken by the bug.
+        """
+        scaled_ppm = 25.0
+        mocker.patch(
+            "crowd_evac.application.cli.compute_fit_ppm",
+            return_value=scaled_ppm,
+        )
+        mocker.patch("crowd_evac.application.cli.ArcadeRenderer")
+        mocker.patch("arcade.Window.__init__", return_value=None)
+
+        sim, floor_plan = build_simulation_from_scenario()
+        window = EvacWindow(sim, floor_plan)
+        src = window._input_source
+
+        click_x_px, click_y_px = 250.0, 175.0
+        from crowd_evac.adapters.render.arcade_input import MOUSE_BUTTON_LEFT
+
+        src.on_mouse_press(click_x_px, click_y_px, MOUSE_BUTTON_LEFT, 0)
+        events = src.poll()
+        assert len(events) == 1
+        world_x, world_y = events[0].pos_m  # type: ignore[union-attr]
+
+        # Re-multiplying by ppm must recover the original pixel position.
+        assert world_x * scaled_ppm == pytest.approx(click_x_px)
+        assert world_y * scaled_ppm == pytest.approx(click_y_px)
