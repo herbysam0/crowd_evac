@@ -27,6 +27,8 @@ from crowd_evac.application.cli import (
     EvacWindow,
     _MIN_PPM,
     _SCREEN_MARGIN,
+    _SimState,
+    _STATE_HINT,
     _get_logical_screen_size,
     build_simulation_from_scenario,
     compute_fit_ppm,
@@ -101,7 +103,6 @@ class TestComputeFitPpm:
 
     def test_small_floor_plan_uses_default_ppm(self, mocker: MockerFixture) -> None:
         """Floor plans that fit at default ppm keep the default."""
-        # Logical screen large enough that the floor plan fits at default ppm.
         mocker.patch(
             "crowd_evac.application.cli._get_logical_screen_size",
             return_value=(3840.0, 2160.0),
@@ -112,15 +113,12 @@ class TestComputeFitPpm:
 
     def test_large_floor_plan_scales_down(self, mocker: MockerFixture) -> None:
         """Floor plans that exceed the screen are scaled to fit within margin."""
-        # 1280×800 logical = a 1920×1200 physical display at 150 % scaling.
         mocker.patch(
             "crowd_evac.application.cli._get_logical_screen_size",
             return_value=(1280.0, 800.0),
         )
-        # Lecture Hall: 50×30 m at 40 px/m → 2000×1200 px — does not fit.
         fp = _make_floor_plan(50.0, 30.0)
         result = compute_fit_ppm(fp)
-        # Must fit within logical screen * margin
         assert fp.width_m * result <= 1280.0 * _SCREEN_MARGIN + 1
         assert fp.height_m * result <= 800.0 * _SCREEN_MARGIN + 1
 
@@ -152,7 +150,7 @@ class TestComputeFitPpm:
             "crowd_evac.application.cli._get_logical_screen_size",
             return_value=(100.0, 80.0),
         )
-        fp = _make_floor_plan(10_000.0, 10_000.0)  # Huge floor plan
+        fp = _make_floor_plan(10_000.0, 10_000.0)
         result = compute_fit_ppm(fp)
         assert result >= _MIN_PPM
 
@@ -164,7 +162,6 @@ class TestComputeFitPpm:
             "crowd_evac.application.cli._get_logical_screen_size",
             return_value=(1600.0, 900.0),
         )
-        # Wide but not tall: width is the binding constraint.
         fp = _make_floor_plan(100.0, 5.0)
         result = compute_fit_ppm(fp)
         assert fp.width_m * result <= 1600.0 * _SCREEN_MARGIN + 1
@@ -175,7 +172,6 @@ class TestComputeFitPpm:
             "crowd_evac.application.cli._get_logical_screen_size",
             return_value=(1600.0, 900.0),
         )
-        # Tall but not wide: height is the binding constraint.
         fp = _make_floor_plan(5.0, 100.0)
         result = compute_fit_ppm(fp)
         assert fp.height_m * result <= 900.0 * _SCREEN_MARGIN + 1
@@ -266,6 +262,15 @@ class TestEvacWindowPpmConsistency:
     These tests run headless by mocking out all GL-dependent objects.
     """
 
+    def _patch_evac_window(self, mocker: MockerFixture, scaled_ppm: float) -> None:
+        """Apply all mocks required to construct :class:`EvacWindow` headless."""
+        mocker.patch(
+            "crowd_evac.application.cli.compute_fit_ppm",
+            return_value=scaled_ppm,
+        )
+        mocker.patch("crowd_evac.application.cli.ArcadeRenderer")
+        mocker.patch("arcade.Window.__init__", return_value=None)
+
     def test_input_source_ppm_matches_renderer_ppm(
         self, mocker: MockerFixture
     ) -> None:
@@ -275,14 +280,7 @@ class TestEvacWindowPpmConsistency:
         that any hardcoded default would trigger an assertion failure.
         """
         scaled_ppm = 25.0
-        mocker.patch(
-            "crowd_evac.application.cli.compute_fit_ppm",
-            return_value=scaled_ppm,
-        )
-        # Avoid GL context — replace the renderer class entirely.
-        mocker.patch("crowd_evac.application.cli.ArcadeRenderer")
-        # Avoid arcade Window constructor (requires display).
-        mocker.patch("arcade.Window.__init__", return_value=None)
+        self._patch_evac_window(mocker, scaled_ppm)
 
         sim, floor_plan = build_simulation_from_scenario()
         window = EvacWindow(sim, floor_plan)
@@ -292,19 +290,15 @@ class TestEvacWindowPpmConsistency:
     def test_coordinate_round_trip_at_scaled_ppm(
         self, mocker: MockerFixture
     ) -> None:
-        """Click pixel / ppm == rendered world position at any fit ppm.
+        """Click pixel → world → pixel round-trip is exact at any fit ppm.
 
-        Verifies end-to-end: a click at pixel (px, py) with the same ppm used
-        for rendering produces world coords that map back to (px, py) when
-        re-multiplied by ppm.  This is the invariant broken by the bug.
+        The renderer draws world_y at ``world_y * ppm`` and the input source
+        converts back via ``pixel_y / ppm``.  The invariant is::
+
+            world_y * ppm == click_y_px
         """
         scaled_ppm = 25.0
-        mocker.patch(
-            "crowd_evac.application.cli.compute_fit_ppm",
-            return_value=scaled_ppm,
-        )
-        mocker.patch("crowd_evac.application.cli.ArcadeRenderer")
-        mocker.patch("arcade.Window.__init__", return_value=None)
+        self._patch_evac_window(mocker, scaled_ppm)
 
         sim, floor_plan = build_simulation_from_scenario()
         window = EvacWindow(sim, floor_plan)
@@ -318,6 +312,38 @@ class TestEvacWindowPpmConsistency:
         assert len(events) == 1
         world_x, world_y = events[0].pos_m  # type: ignore[union-attr]
 
-        # Re-multiplying by ppm must recover the original pixel position.
         assert world_x * scaled_ppm == pytest.approx(click_x_px)
         assert world_y * scaled_ppm == pytest.approx(click_y_px)
+
+
+class TestSimStateMachine:
+    """Tests for the :class:`_SimState` enum and :data:`_STATE_HINT` mapping."""
+
+    # -- Happy path -------------------------------------------------------
+
+    def test_paused_initial_has_hint(self) -> None:
+        """PAUSED_INITIAL shows a non-empty hint prompting the player to start."""
+        assert _STATE_HINT[_SimState.PAUSED_INITIAL]
+
+    def test_paused_mid_has_hint(self) -> None:
+        """PAUSED_MID shows a non-empty hint prompting the player to continue."""
+        assert _STATE_HINT[_SimState.PAUSED_MID]
+
+    def test_complete_has_hint(self) -> None:
+        """COMPLETE shows a non-empty hint prompting the player to reset."""
+        assert _STATE_HINT[_SimState.COMPLETE]
+
+    def test_running_has_no_hint(self) -> None:
+        """RUNNING has no hint — the message is hidden while the sim advances."""
+        assert _SimState.RUNNING not in _STATE_HINT
+
+    # -- Edge cases -------------------------------------------------------
+
+    def test_state_enum_has_four_values(self) -> None:
+        """Exactly four simulation states exist."""
+        assert len(list(_SimState)) == 4
+
+    def test_hint_map_covers_all_non_running_states(self) -> None:
+        """Every state except RUNNING has a hint entry."""
+        non_running = {s for s in _SimState if s != _SimState.RUNNING}
+        assert non_running == set(_STATE_HINT.keys())

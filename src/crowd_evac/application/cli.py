@@ -12,6 +12,7 @@ testable headless.  :func:`main` takes that result, opens an
 """
 from __future__ import annotations
 
+import enum
 import logging
 
 import arcade
@@ -48,6 +49,31 @@ window does not clip against screen edges.
 
 _MIN_PPM: float = 5.0
 """Hard lower bound on pixels-per-meter to keep geometry legible."""
+
+
+class _SimState(enum.Enum):
+    """State machine governing simulation playback via the spacebar.
+
+    State transitions:
+      PAUSED_INITIAL → RUNNING     (player presses SPACE — "start")
+      RUNNING        → PAUSED_MID  (player presses SPACE — "pause")
+      PAUSED_MID     → RUNNING     (player presses SPACE — "continue")
+      RUNNING        → COMPLETE    (evacuation finishes automatically)
+      COMPLETE       → PAUSED_INITIAL (player presses SPACE — "reset")
+    """
+
+    PAUSED_INITIAL = "paused_initial"
+    RUNNING = "running"
+    PAUSED_MID = "paused_mid"
+    COMPLETE = "complete"
+
+
+_STATE_HINT: dict[_SimState, str] = {
+    _SimState.PAUSED_INITIAL: "Press SPACE to start",
+    _SimState.PAUSED_MID: "Press SPACE to continue",
+    _SimState.COMPLETE: "Press SPACE to reset",
+}
+"""On-screen hint shown when the simulation is not running."""
 
 
 def _get_logical_screen_size() -> tuple[float, float] | None:
@@ -196,45 +222,56 @@ def build_simulation_from_scenario(
 class EvacWindow(arcade.Window):
     """Arcade window driving the fixed-step render/input loop (FR-0 R0.1).
 
-    ``on_update`` advances the simulation by one tick and drains the mouse
-    input queue each frame.  ``on_draw`` renders the current snapshot via
-    :class:`~crowd_evac.adapters.render.arcade_renderer.ArcadeRenderer` and
-    overlays a completion message once the evacuation ends.
+    The window starts **paused**: the simulation does not advance until the
+    player presses **SPACE**.  The spacebar cycles through the states defined
+    by :class:`_SimState`:
 
-    The window stays open after evacuation completes so the player can see
-    the final state; close it manually to exit.
+    * ``SPACE`` (initial) → starts the simulation (PAUSED_INITIAL → RUNNING).
+    * ``SPACE`` (running) → freezes it mid-run (RUNNING → PAUSED_MID).
+    * ``SPACE`` (paused)  → resumes from mid-run pause (PAUSED_MID → RUNNING).
+    * ``SPACE`` (complete) → rebuilds the simulation and returns to the paused
+      initial state (COMPLETE → PAUSED_INITIAL).
+
+    An on-screen hint (``"Press SPACE to …"``) is shown in all non-running
+    states and hidden while the simulation advances.
 
     Args:
         sim: Fully-wired simulation at tick 0.
         floor_plan: Static geometry for this scenario.  Used to size the window
-            (``width_m × height_m × pixels_per_meter``) and passed to the
-            renderer.
+            (``width_m × height_m × pixels_per_meter``).
+        scenario_name: Bundled scenario name used to rebuild the simulation on
+            Reset.  Defaults to :data:`DEFAULT_SCENARIO`.
     """
 
-    def __init__(self, sim: Simulation, floor_plan: FloorPlan) -> None:
+    def __init__(
+        self,
+        sim: Simulation,
+        floor_plan: FloorPlan,
+        scenario_name: str = DEFAULT_SCENARIO,
+    ) -> None:
         """Open a window sized to the floor plan and wire adapters.
-
-        The window size is computed via :func:`compute_fit_ppm` so the entire
-        floor plan — including perimeter walls — is always fully visible within
-        the primary monitor's bounds.
 
         Args:
             sim: Simulation to drive.
             floor_plan: Provides physical dimensions and geometry.
+            scenario_name: Scenario to reload on Reset.
         """
         ppm = compute_fit_ppm(floor_plan)
         width_px = int(floor_plan.width_m * ppm)
         height_px = int(floor_plan.height_m * ppm)
         super().__init__(width_px, height_px, WINDOW_TITLE)
+
         self._sim = sim
-        # Agent visual size is now proportional to pixels_per_meter, so it
-        # automatically scales when ppm is adjusted to fit the floor plan on screen
+        self._scenario_name = scenario_name
+        self._ppm = ppm
+        self._floor_plan = floor_plan
+        self._sim_state: _SimState = _SimState.PAUSED_INITIAL
+        self._current_source: PanicSource | None = None
+
         self._renderer = ArcadeRenderer(floor_plan, pixels_per_meter=ppm)
-        # pixels_per_meter must match the renderer so that mouse-click pixel
-        # coordinates convert to the same world space that the renderer uses.
         self._input_source = ArcadeInputSource(pixels_per_meter=ppm)
         self._input_source.register(self)
-        self._current_source: PanicSource | None = None
+
         logger.info(
             "EvacWindow opened: %d×%d px at %.2f px/m (%.1f×%.1f m).",
             width_px,
@@ -244,20 +281,79 @@ class EvacWindow(arcade.Window):
             floor_plan.height_m,
         )
 
-    def on_update(self, delta_time: float) -> None:
-        """Advance the simulation by one tick and process pending mouse input.
+    # ------------------------------------------------------------------
+    # State-machine helpers
+    # ------------------------------------------------------------------
 
-        Drains :meth:`~ArcadeInputSource.poll` first so each tick sees the
-        input events that arrived during the *previous* frame.  If the
-        simulation has already completed no step is taken and the display
-        remains frozen on the final state.
+    def _handle_spacebar(self) -> None:
+        """Advance the simulation state machine on spacebar press.
+
+        Transitions:
+          PAUSED_INITIAL → RUNNING     (start)
+          RUNNING        → PAUSED_MID  (pause)
+          PAUSED_MID     → RUNNING     (continue)
+          COMPLETE       → PAUSED_INITIAL (reset — rebuilds sim)
+        """
+        if self._sim_state == _SimState.PAUSED_INITIAL:
+            self._sim_state = _SimState.RUNNING
+        elif self._sim_state == _SimState.RUNNING:
+            self._sim_state = _SimState.PAUSED_MID
+        elif self._sim_state == _SimState.PAUSED_MID:
+            self._sim_state = _SimState.RUNNING
+        elif self._sim_state == _SimState.COMPLETE:
+            self._reset()
+            return
+        logger.info("EvacWindow: state → %s", self._sim_state.value)
+
+    def _reset(self) -> None:
+        """Rebuild the simulation from the original scenario.
+
+        Creates a fresh :class:`~crowd_evac.application.simulation.Simulation`
+        loaded from :attr:`_scenario_name`, clears any active panic source,
+        re-registers the input source, and returns the state machine to
+        :attr:`_SimState.PAUSED_INITIAL`.
+        """
+        sim, _ = build_simulation_from_scenario(self._scenario_name)
+        self._sim = sim
+        self._current_source = None
+        self._input_source = ArcadeInputSource(pixels_per_meter=self._ppm)
+        self._input_source.register(self)
+        self._sim_state = _SimState.PAUSED_INITIAL
+        logger.info(
+            "EvacWindow: simulation reset from scenario=%r.", self._scenario_name
+        )
+
+    # ------------------------------------------------------------------
+    # Arcade callbacks
+    # ------------------------------------------------------------------
+
+    def on_key_press(self, symbol: int, modifiers: int) -> None:
+        """Handle spacebar to start, pause, continue, or reset the simulation.
+
+        Args:
+            symbol: Key symbol constant from ``arcade.key``.
+            modifiers: Keyboard modifier bitmask (unused).
+        """
+        if symbol == arcade.key.SPACE:
+            self._handle_spacebar()
+
+    def on_update(self, delta_time: float) -> None:
+        """Advance the simulation when running; detect evacuation completion.
+
+        Does nothing unless the state is :attr:`_SimState.RUNNING`.  When
+        :attr:`~Simulation.is_complete` becomes ``True`` mid-run, transitions
+        automatically to :attr:`_SimState.COMPLETE`.
 
         Args:
             delta_time: Seconds since last frame (provided by arcade; the
                 simulation ignores it and always advances by the fixed
                 :data:`~crowd_evac.domain.constants.DT`).
         """
+        if self._sim_state != _SimState.RUNNING:
+            return
         if self._sim.is_complete:
+            self._sim_state = _SimState.COMPLETE
+            logger.info("EvacWindow: evacuation complete — state → complete.")
             return
         events = self._input_source.poll()
         self._current_source = process_input_events(
@@ -268,16 +364,18 @@ class EvacWindow(arcade.Window):
         self._sim.step()
 
     def on_draw(self) -> None:
-        """Render the current snapshot and overlay the completion message.
+        """Render the simulation snapshot and on-screen state hint.
 
-        Clears the framebuffer, draws all geometry and agents via the
-        :class:`ArcadeRenderer`, then overlays centred white text once
-        :attr:`~Simulation.is_complete` is ``True``.
+        Drawing order:
+          1. Clear framebuffer.
+          2. Simulation snapshot.
+          3. Completion overlay text (only when ``COMPLETE``).
+          4. State hint at window bottom (hidden while running).
         """
         self.clear()
         snapshot = self._sim.snapshot()
         self._renderer.render(snapshot)
-        if self._sim.is_complete:
+        if self._sim_state == _SimState.COMPLETE:
             arcade.draw_text(
                 f"Evacuation complete — "
                 f"{snapshot.evacuated_count} evacuated "
@@ -286,6 +384,16 @@ class EvacWindow(arcade.Window):
                 self.height / 2,
                 arcade.color.WHITE,
                 font_size=18,
+                anchor_x="center",
+            )
+        hint = _STATE_HINT.get(self._sim_state)
+        if hint is not None:
+            arcade.draw_text(
+                hint,
+                self.width / 2,
+                20,
+                arcade.color.LIGHT_GRAY,
+                font_size=14,
                 anchor_x="center",
             )
 
@@ -305,6 +413,6 @@ def main() -> None:
         level=logging.INFO,
         format="%(levelname)s %(name)s: %(message)s",
     )
-    sim, floor_plan = build_simulation_from_scenario()
-    EvacWindow(sim, floor_plan)
+    sim, floor_plan = build_simulation_from_scenario(DEFAULT_SCENARIO)
+    EvacWindow(sim, floor_plan, DEFAULT_SCENARIO)
     arcade.run()

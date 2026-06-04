@@ -285,8 +285,8 @@ vetted (Windows wheel, maintenance, license) in Step 1.1 before install.
 - **Add:** after evacuation is complete the button change to "Reset", pressing it resets the scenario and back to pause.
 - **Add:** emergency sources should also include an icon at the position of the emergency source, shaped like the event type.
 - **Fix:** entire area including all walls MUST be visible on the screen..
-- **Modify:** emergency 1nfluence area should be more transparent.
-- **Modify:** agent symbol size should be proportional to pixel per meter, showing diameter of 40 cm.
+- **Modify:** emergency influence area should be more transparent.
+- **Modify:** place symbol of the emergency type in its position, size configurable per type, eg fire symbol size 3 meter.
 - **Fix:** the speed of the events seems not aligned to real time. Explore that and give insights.
 - **Add:** velocity slider, from x0.1 to X3, with snap to x1.
 - **Fix:** when queueing by the exit, any agent not exiting yet is still bound to forces. Currently it looks like many agents are positioned inside the exit and waiting for their turn, and the correct behavior should be that they can't get to the exit because of the density.
@@ -294,7 +294,7 @@ vetted (Windows wheel, maintenance, license) in Step 1.1 before install.
 - **Explore:** during emergencies some agents don't move, even though they are not blocked.
 - **Explore:** during emergencies some agents stay in queue when another exit is free nearby.
 - **Fix:** mismatch between mouse click position and emergency spawn.
-- **Add:** place symbol of the emergency type in its position, size configurable per type, eg fire symbil size 3 meter.
+- **Add:** 
 
 
 

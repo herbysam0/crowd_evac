@@ -59,13 +59,22 @@ class ArcadeInputSource:
         pixels_per_meter: World-to-pixel scale factor.  Must match the
             :class:`~crowd_evac.adapters.render.arcade_renderer.ArcadeRenderer`
             configured for the same session.
+        y_offset_px: Vertical pixel offset of the simulation viewport above the
+            window bottom (e.g. control-panel height).  Clicks with
+            ``y < y_offset_px`` are ignored; all other y-coordinates are
+            shifted by ``-y_offset_px`` before dividing by ``pixels_per_meter``.
 
     Attributes:
         pixels_per_meter: Stored scale factor (read-only by convention).
     """
 
-    def __init__(self, pixels_per_meter: float = PIXELS_PER_METER) -> None:
+    def __init__(
+        self,
+        pixels_per_meter: float = PIXELS_PER_METER,
+        y_offset_px: float = 0.0,
+    ) -> None:
         self.pixels_per_meter: float = pixels_per_meter
+        self._y_offset_px: float = y_offset_px
         self._queue: list[InputEvent] = []
 
     # ------------------------------------------------------------------
@@ -92,7 +101,13 @@ class ArcadeInputSource:
         """
         if button != MOUSE_BUTTON_LEFT:
             return
-        pos_m = (x / self.pixels_per_meter, y / self.pixels_per_meter)
+        # Ignore clicks inside the control panel area below the simulation viewport
+        if y < self._y_offset_px:
+            return
+        pos_m = (
+            x / self.pixels_per_meter,
+            (y - self._y_offset_px) / self.pixels_per_meter,
+        )
         self._queue.append(PlacePanicSourceEvent(pos_m=pos_m))
         logger.info(
             "input: place fire %.4f %.4f  # add_panic_source fire %.4f %.4f",
@@ -126,7 +141,13 @@ class ArcadeInputSource:
         """
         if not (buttons & MOUSE_BUTTON_LEFT):
             return
-        pos_m = (x / self.pixels_per_meter, y / self.pixels_per_meter)
+        # Ignore drags that originate in the control panel area
+        if y < self._y_offset_px:
+            return
+        pos_m = (
+            x / self.pixels_per_meter,
+            (y - self._y_offset_px) / self.pixels_per_meter,
+        )
         self._queue.append(MovePanicSourceEvent(pos_m=pos_m))
         logger.info(
             "input: move fire %.4f %.4f  # move_panic_source fire %.4f %.4f",

@@ -243,6 +243,9 @@ class ArcadeRenderer:
         background_image: Optional filesystem path to a background image
             (R7.1).  Loaded once at GL init; silently skipped on load failure.
         headless: If ``True``, skip all GL operations. For testing only.
+        y_offset_px: Vertical offset in pixels applied to all drawn geometry
+            and agents.  Use this when the window reserves space at the bottom
+            (e.g. a control panel) so the simulation viewport starts above y=0.
 
     Attributes:
         floor_plan: The :class:`~crowd_evac.domain.floor_plan.FloorPlan`
@@ -257,6 +260,7 @@ class ArcadeRenderer:
         agent_radius_m: float = AGENT_RADIUS,
         background_image: str | None = None,
         headless: bool = False,
+        y_offset_px: float = 0.0,
     ) -> None:
         self.floor_plan = floor_plan
         self._ppm = pixels_per_meter
@@ -264,6 +268,7 @@ class ArcadeRenderer:
         self._agent_radius_px = int(round(agent_radius_m * pixels_per_meter))
         self._background_image = background_image
         self._headless = headless
+        self._y_offset_px = y_offset_px
 
         self._agent_sprites: arcade.SpriteList[arcade.SpriteCircle] | None = None
         # Background image sprite is held in a SpriteList so arcade 3.x
@@ -276,13 +281,15 @@ class ArcadeRenderer:
             self._init_gl()
 
         logger.debug(
-            "ArcadeRenderer constructed (headless=%s, ppm=%.1f, agent_radius=%.2f m (%.1f px), floor=%.1f×%.1f m).",
+            "ArcadeRenderer constructed (headless=%s, ppm=%.1f, agent_radius=%.2f m (%.1f px), "
+            "floor=%.1f×%.1f m, y_offset=%.0f px).",
             headless,
             pixels_per_meter,
             agent_radius_m,
             self._agent_radius_px,
             floor_plan.width_m,
             floor_plan.height_m,
+            y_offset_px,
         )
 
     def _init_gl(self) -> None:
@@ -360,17 +367,18 @@ class ArcadeRenderer:
         """Fill the room bounding box with the floor background colour."""
         fp = self.floor_plan
         ppm = self._ppm
-        _draw_filled_rect(0.0, 0.0, fp.width_m * ppm, fp.height_m * ppm, FLOOR_COLOR)
+        _draw_filled_rect(0.0, self._y_offset_px, fp.width_m * ppm, fp.height_m * ppm, FLOOR_COLOR)
 
     def _draw_geometry(self) -> None:
         """Draw walls, interior obstacles, and exit-opening rectangles."""
         fp = self.floor_plan
         ppm = self._ppm
+        y_off = self._y_offset_px
 
         for wall in fp.walls:
             _draw_filled_rect(
                 wall.x * ppm,
-                wall.y * ppm,
+                wall.y * ppm + y_off,
                 wall.width * ppm,
                 wall.height * ppm,
                 WALL_COLOR,
@@ -379,7 +387,7 @@ class ArcadeRenderer:
         for obs in fp.obstacles:
             _draw_filled_rect(
                 obs.x * ppm,
-                obs.y * ppm,
+                obs.y * ppm + y_off,
                 obs.width * ppm,
                 obs.height * ppm,
                 OBSTACLE_COLOR,
@@ -391,13 +399,13 @@ class ArcadeRenderer:
             if exit_.side in (ExitSide.SOUTH, ExitSide.NORTH):
                 # Opening spans along x; depth extends along y
                 x0 = (exit_.x - half) * ppm
-                y0 = (exit_.y - depth / 2.0) * ppm
+                y0 = (exit_.y - depth / 2.0) * ppm + y_off
                 w = exit_.width_m * ppm
                 h = depth * ppm
             else:
                 # EAST or WEST: opening spans along y; depth extends along x
                 x0 = (exit_.x - depth / 2.0) * ppm
-                y0 = (exit_.y - half) * ppm
+                y0 = (exit_.y - half) * ppm + y_off
                 w = depth * ppm
                 h = exit_.width_m * ppm
             _draw_filled_rect(x0, y0, w, h, EXIT_COLOR)
@@ -415,6 +423,7 @@ class ArcadeRenderer:
             sources: Panic sources from the current snapshot (read-only).
         """
         ppm = self._ppm
+        y_off = self._y_offset_px
         r_base, g_base, b_base, _ = PANIC_SOURCE_COLOR
         for src in sources:
             if not src.is_active:
@@ -424,7 +433,7 @@ class ArcadeRenderer:
             color: RGBA255 = (r_base, g_base, b_base, alpha)
             arcade.draw_circle_filled(
                 src.x * ppm,
-                src.y * ppm,
+                src.y * ppm + y_off,
                 src.radius * intensity * ppm,
                 color,
             )
@@ -456,13 +465,14 @@ class ArcadeRenderer:
         panics = snapshot.panics
         alive = snapshot.alive
         ppm = self._ppm
+        y_off = self._y_offset_px
 
         for i, sprite in enumerate(self._agent_sprites):
             is_alive = bool(alive[i])
             sprite.visible = is_alive
             if is_alive:
                 sprite.center_x = float(positions[i, 0]) * ppm
-                sprite.center_y = float(positions[i, 1]) * ppm
+                sprite.center_y = float(positions[i, 1]) * ppm + y_off
                 p = max(0.0, min(1.0, float(panics[i])))
                 sprite.color = _interpolate_color(CALM_COLOR, PANIC_COLOR, p)
 
