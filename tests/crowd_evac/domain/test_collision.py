@@ -191,6 +191,31 @@ class TestIsBlocked:
 
 
 # ---------------------------------------------------------------------------
+# cells_blocked — integer cell-index classification
+# ---------------------------------------------------------------------------
+
+
+class TestCellsBlocked:
+    """cells_blocked classifies integer cell coordinates (OOB == blocked)."""
+
+    def test_blocked_and_open_cells(self) -> None:
+        """Blocked and open in-bounds cells classify correctly (happy)."""
+        cmap = _wall_column_map()
+        rows = np.array([0, 0], dtype=np.intp)
+        cols = np.array([2, 0], dtype=np.intp)  # col 2 blocked, col 0 open
+        np.testing.assert_array_equal(
+            cmap.cells_blocked(rows, cols), np.array([True, False])
+        )
+
+    def test_out_of_bounds_is_blocked(self) -> None:
+        """Cells outside the grid report blocked (edge)."""
+        cmap = _wall_column_map()
+        rows = np.array([-1, 99, 0], dtype=np.intp)
+        cols = np.array([0, 0, -1], dtype=np.intp)
+        assert np.all(cmap.cells_blocked(rows, cols))
+
+
+# ---------------------------------------------------------------------------
 # resolve — axis-separated sliding
 # ---------------------------------------------------------------------------
 

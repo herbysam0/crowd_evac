@@ -35,7 +35,7 @@ from __future__ import annotations
 import numpy as np
 import numpy.typing as npt
 
-from crowd_evac.domain.agent_state import AgentState, Bool1D, Vec2Array
+from crowd_evac.domain.agent_state import AgentState, Bool1D, Int1D, Vec2Array
 from crowd_evac.domain.constants import GRID_CELL_SIZE
 from crowd_evac.domain.floor_plan import FloorPlan
 
@@ -136,12 +136,34 @@ class CollisionMap:
             )
         c = np.floor(pts[:, 0] / self.cell_size).astype(np.intp)
         r = np.floor(pts[:, 1] / self.cell_size).astype(np.intp)
+        return self.cells_blocked(r, c)
+
+    def cells_blocked(self, rows: Int1D, cols: Int1D) -> Bool1D:
+        """Classify integer cell coordinates as blocked or out-of-bounds.
+
+        Out-of-bounds cells report ``True`` so the room's bounding box behaves
+        as a solid boundary even where no explicit wall cell is present. This
+        is the cell-index counterpart to :meth:`is_blocked` and is reused by
+        the no-overlap projection
+        (:func:`crowd_evac.domain.overlap.resolve_overlaps`) to scan the grid
+        neighbourhood around each agent.
+
+        Args:
+            rows: Cell row indices, shape ``(N,)``.
+            cols: Cell column indices, shape ``(N,)`` (same length as ``rows``).
+
+        Returns:
+            Boolean array of shape ``(N,)``; ``True`` where the cell is blocked
+            or lies outside the grid.
+        """
         in_bounds: Bool1D = (
-            (r >= 0) & (r < self._rows) & (c >= 0) & (c < self._cols)
+            (rows >= 0)
+            & (rows < self._rows)
+            & (cols >= 0)
+            & (cols < self._cols)
         )
-        # Out-of-bounds defaults to blocked; in-bounds reads the grid.
-        result: Bool1D = np.ones(pts.shape[0], dtype=np.bool_)
-        result[in_bounds] = self._blocked[r[in_bounds], c[in_bounds]]
+        result: Bool1D = np.ones(rows.shape[0], dtype=np.bool_)
+        result[in_bounds] = self._blocked[rows[in_bounds], cols[in_bounds]]
         return result
 
     def resolve(self, state: AgentState, prev_pos: Vec2Array) -> None:

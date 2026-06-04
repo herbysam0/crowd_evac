@@ -291,7 +291,8 @@ vetted (Windows wheel, maintenance, license) in Step 1.1 before install.
 - **Add:** velocity slider, from x0.1 to X3, with snap to x1.
 - **Fix:** when queueing by the exit, any agent not exiting yet is still bound to forces. Currently it looks like many agents are positioned inside the exit and waiting for their turn, and the correct behavior should be that they can't get to the exit because of the density.
 - **Fix:** agents can NEVER overlap with agents, walls or obstacles. It is calculated by the radius of agents. Examples: distance between agents can never be smaller than 2 times the radius, agent distance from the wall can be smaller than the radius.
-- **Fix:** during emergencies some agents don't move, even though they are not blocked.
+- **Explore:** during emergencies some agents don't move, even though they are not blocked.
+- **Explore:** during emergencies some agents stay in queue when another exit is free nearby.
 - **Fix:** mismatch between mouse click position and emergency spawn.
 
 
@@ -320,6 +321,9 @@ vetted (Windows wheel, maintenance, license) in Step 1.1 before install.
 
 ### 1.24 Spawn region
 - **Do:** define spawn region within the walkable region. For example, in stadium spawn aget in the seating areas but not in the hall areas.
+
+### 1.25 Initial Documentation
+- **Do:** update readme.md and PRD.md according to the latest implementation. Include UML diagrams..
 
 ---
 

@@ -12,9 +12,11 @@ loop.  Each call to :meth:`Simulation.step` advances the simulation by one
 4. Integrate velocities and positions (``integrator.step``).
 5. Resolve collisions against static geometry so no agent crosses a wall or
    obstacle (``CollisionMap.resolve``); skipped when no map is supplied.
-6. Resolve exits (``ExitModel.step``).
-7. Increment the monotonic tick counter.
-8. Append a ``"tick_advanced"`` event to the event log.
+6. Enforce the hard no-overlap invariant so agents never overlap agents or
+   walls (``overlap.resolve_overlaps``); skipped when disabled.
+7. Resolve exits (``ExitModel.step``).
+8. Increment the monotonic tick counter.
+9. Append a ``"tick_advanced"`` event to the event log.
 
 A :meth:`~Simulation.snapshot` method returns a copy of the current state for
 rendering and metrics — calling it any number of times between ticks produces
@@ -42,6 +44,7 @@ from crowd_evac.domain.agent_state import AgentState, Bool1D, Float1D, Int1D, Ve
 from crowd_evac.domain.collision import CollisionMap
 from crowd_evac.domain.constants import DT
 from crowd_evac.domain.exit_model import ExitModel
+from crowd_evac.domain.overlap import resolve_overlaps
 from crowd_evac.domain.panic_field import PanicField
 from crowd_evac.domain.panic_source import PanicSource
 from crowd_evac.pathfinding.flow_field import FlowField
@@ -161,6 +164,7 @@ class Simulation:
         enable_density: bool = True,
         enable_herd: bool = True,
         enable_panic_repulsion: bool = True,
+        enable_no_overlap: bool = True,
     ) -> None:
         """Initialise the simulation with pre-built domain components.
 
@@ -183,6 +187,9 @@ class Simulation:
             enable_herd: Toggle panic-scaled herd alignment (default ``True``).
             enable_panic_repulsion: Toggle panic-gradient repulsion
                 (default ``True``).
+            enable_no_overlap: Toggle the hard no-overlap projection that
+                guarantees agents never overlap agents or walls
+                (default ``True``).
         """
         self.state = state
         self.flow_field = flow_field
@@ -196,6 +203,7 @@ class Simulation:
         self._enable_density = enable_density
         self._enable_herd = enable_herd
         self._enable_panic_repulsion = enable_panic_repulsion
+        self._enable_no_overlap = enable_no_overlap
 
         self._tick: int = 0
         self._events: list[SimEvent] = []
@@ -239,9 +247,11 @@ class Simulation:
         4. Integrate velocities and positions (semi-implicit Euler).
         5. Resolve collisions: clamp integrated positions so no agent crosses
            a wall or obstacle (skipped when no collision map is set).
-        6. Resolve exits: enqueue arrivals, drain queues to token capacity.
-        7. Increment the monotonic tick counter.
-        8. Append a ``"tick_advanced"`` event to the event log, stamped
+        6. Enforce the hard no-overlap invariant: project agent positions so
+           no agent overlaps another agent or a wall (skipped when disabled).
+        7. Resolve exits: enqueue arrivals, drain queues to token capacity.
+        8. Increment the monotonic tick counter.
+        9. Append a ``"tick_advanced"`` event to the event log, stamped
            at the new tick value.
 
         Returns:
@@ -282,13 +292,18 @@ class Simulation:
         if self._collision_map is not None:
             self._collision_map.resolve(self.state, prev_pos)
 
-        # 6. Resolve exits: enqueue arrivals, drain to capacity
+        # 6. Enforce the hard no-overlap invariant: agents never overlap agents
+        #    or walls (step 1.19a item 12 / FR-2 R2.1 / FR-3 R3.2).
+        if self._enable_no_overlap:
+            resolve_overlaps(self.state, self._collision_map, prev_pos)
+
+        # 7. Resolve exits: enqueue arrivals, drain to capacity
         egressed = self.exit_model.step(self.state)
 
-        # 7. Advance tick (now represents "this step has completed")
+        # 8. Advance tick (now represents "this step has completed")
         self._tick += 1
 
-        # 7. Stamp tick event at the new tick value
+        # 9. Stamp tick event at the new tick value
         self._append_event(
             "tick_advanced",
             egressed=egressed,

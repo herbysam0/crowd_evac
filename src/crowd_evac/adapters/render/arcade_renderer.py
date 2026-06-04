@@ -77,7 +77,7 @@ OBSTACLE_COLOR: RGBA255 = (65, 65, 75, 255)
 EXIT_COLOR: RGBA255 = (55, 190, 75, 220)
 """Exit opening highlight colour (green)."""
 
-PANIC_SOURCE_COLOR: RGBA255 = (235, 110, 25, 180)
+PANIC_SOURCE_COLOR: RGBA255 = (235, 110, 25, 100)
 """Panic source base colour (orange); alpha is scaled by source intensity."""
 
 

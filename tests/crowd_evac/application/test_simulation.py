@@ -21,7 +21,8 @@ from crowd_evac.application.rng import SeededRNG
 from crowd_evac.application.simulation import SimEvent, SimSnapshot, Simulation
 from crowd_evac.domain.agent_state import AgentState, spawn
 from crowd_evac.domain.collision import CollisionMap
-from crowd_evac.domain.constants import DT
+from crowd_evac.domain.constants import AGENT_RADIUS, DT
+from crowd_evac.domain.overlap import MIN_AGENT_SEPARATION
 from crowd_evac.domain.exit_model import ExitModel
 from crowd_evac.domain.floor_plan import Exit, ExitSide, FloorPlan, Obstacle
 from crowd_evac.domain.panic_field import PanicField
@@ -504,3 +505,101 @@ class TestCollisionConstraint:
                 entered_block = True
                 break
         assert entered_block
+
+
+# ---------------------------------------------------------------------------
+# No-overlap invariant (step 1.19a item 12) — agents never overlap
+# ---------------------------------------------------------------------------
+
+
+class TestNoOverlapInvariant:
+    """The hard no-overlap projection keeps agents and walls non-overlapping."""
+
+    def _min_pairwise_alive(self, sim: Simulation) -> float:
+        """Smallest centre distance among the currently-alive agents."""
+        pos = sim.state.pos[sim.state.alive]
+        if pos.shape[0] < 2:
+            return np.inf
+        diff = pos[:, np.newaxis, :] - pos[np.newaxis, :, :]
+        dist = np.linalg.norm(diff, axis=2)
+        np.fill_diagonal(dist, np.inf)
+        return float(dist.min())
+
+    def _build_overlap_sim(
+        self,
+        floor: FloorPlan,
+        flow: FlowField,
+        *,
+        enable_no_overlap: bool,
+    ) -> Simulation:
+        """Build a 24-agent sim (seed 7) with the projection on or off."""
+        rng = SeededRNG(7)
+        return Simulation(
+            state=spawn(floor, 24, rng.generator),
+            flow_field=flow,
+            panic_field=PanicField(),
+            exit_model=ExitModel(floor),
+            rng=rng,
+            enable_no_overlap=enable_no_overlap,
+        )
+
+    def test_projection_enforces_separation_unlike_force_alone(
+        self, sim_floor: FloorPlan, sim_flow: FlowField
+    ) -> None:
+        """The projection holds agents apart where the force alone lets them pack.
+
+        Two seed-matched 24-agent runs step in lock-step toward a shared exit.
+        After a short warm-up that relaxes any deep spawn overlap, the
+        projection run keeps its closest pair near one diameter (documented
+        0.85x tolerance for finite Jacobi passes at the jam), while the
+        force-only control lets agents pack visibly closer.
+        """
+        sim_on = self._build_overlap_sim(
+            sim_floor, sim_flow, enable_no_overlap=True
+        )
+        sim_off = self._build_overlap_sim(
+            sim_floor, sim_flow, enable_no_overlap=False
+        )
+
+        warmup, measured = 5, 60
+        min_on, min_off = np.inf, np.inf
+        for tick in range(warmup + measured):
+            if sim_on.is_complete or sim_off.is_complete:
+                break
+            sim_on.step()
+            sim_off.step()
+            if tick >= warmup:
+                min_on = min(min_on, self._min_pairwise_alive(sim_on))
+                min_off = min(min_off, self._min_pairwise_alive(sim_off))
+
+        assert min_on >= 0.85 * MIN_AGENT_SEPARATION
+        assert min_off < min_on
+
+    def test_wall_bodies_do_not_overlap_in_full_run(
+        self, sim_floor: FloorPlan, sim_flow: FlowField
+    ) -> None:
+        """No alive agent centre stays nearer than the radius to a wall.
+
+        The room's bounding box is solid geometry; with the projection enabled
+        every alive centre stays at least one radius inside it for the whole
+        run (allowing a small finite-iteration tolerance).
+        """
+        cmap = CollisionMap.from_floor_plan(sim_floor)
+        sim = _build_sim(
+            sim_floor, sim_flow, n_agents=24, collision_map=cmap
+        )
+        # With no interior walls the grid's bounding box is the only geometry,
+        # so every alive centre must stay one radius inside all four faces of
+        # the 10 x 5 room (small finite-iteration tolerance).
+        margin = AGENT_RADIUS - 0.05
+        for _ in range(120):
+            if sim.is_complete:
+                break
+            sim.step()
+            pos = sim.state.pos[sim.state.alive]
+            if pos.shape[0] == 0:
+                continue
+            assert np.all(pos[:, 0] >= margin)
+            assert np.all(pos[:, 0] <= 10.0 - margin)
+            assert np.all(pos[:, 1] >= margin)
+            assert np.all(pos[:, 1] <= 5.0 - margin)

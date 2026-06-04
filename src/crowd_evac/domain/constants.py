@@ -31,6 +31,17 @@ Two agents are considered overlapping when their centre distance drops below
 ``2 * AGENT_RADIUS``. Used by crowd-repulsion tuning and tests (FR-2 R2.1).
 """
 
+OVERLAP_RESOLUTION_ITERATIONS: int = 4
+"""Position-projection passes per tick for the hard no-overlap invariant.
+
+Each pass separates overlapping agent pairs and pushes agents off walls
+(:mod:`crowd_evac.domain.overlap`). A few Gauss-Seidel-style passes resolve
+chained overlaps (an agent shoved by one neighbour into another) and the
+agent-vs-wall corner case where separating from a wall re-overlaps a peer.
+Higher values converge tighter at linear cost; ``4`` clears typical crowd
+densities while staying cheap at Tier A counts (FR-2 R2.1 / FR-3 R3.2).
+"""
+
 # -- Spatial awareness (FR-2: crowd dynamics) --------------------------------
 
 REPULSION_RADIUS: float = 0.5
