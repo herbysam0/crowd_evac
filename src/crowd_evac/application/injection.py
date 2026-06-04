@@ -33,6 +33,11 @@ from crowd_evac.application.simulation import Simulation
 from crowd_evac.domain.constants import PANIC_DECAY_RATE, PANIC_RANGE
 from crowd_evac.domain.errors import PathfindingError
 from crowd_evac.domain.panic_source import PanicSource
+from crowd_evac.ports.input_source import (
+    InputEvent,
+    MovePanicSourceEvent,
+    PlacePanicSourceEvent,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -232,3 +237,82 @@ def _cells_in_radius(
             if math.hypot(cx - x, cy - y) <= radius:
                 result.append((r, c))
     return result
+
+
+def process_input_events(
+    sim: Simulation,
+    events: list[InputEvent],
+    current_source: PanicSource | None = None,
+    *,
+    source_type: str = "fire",
+    intensity: float = 1.0,
+    radius: float = PANIC_RANGE,
+    decay_rate: float = PANIC_DECAY_RATE,
+) -> PanicSource | None:
+    """Route input events through the injection API (FR-7 R7.2 / FR-15 subset).
+
+    Processes :class:`~crowd_evac.ports.input_source.PlacePanicSourceEvent`
+    and :class:`~crowd_evac.ports.input_source.MovePanicSourceEvent` objects
+    from an :class:`~crowd_evac.ports.input_source.InputSource`, calling
+    :func:`add_panic_source` / :func:`remove_panic_source` on the simulation.
+    This is the single bridge where raw UI events become domain mutations —
+    no adapter may bypass this function to mutate domain state directly (R7.2).
+
+    Each command is INFO-logged with CLI-equivalent syntax as a seed for the
+    replay scripting feature (R15.4).
+
+    Args:
+        sim: Running simulation to inject into.
+        events: Event list returned by ``InputSource.poll()``.
+        current_source: Most recently placed :class:`PanicSource`, or ``None``.
+            On a :class:`MovePanicSourceEvent`, this source is removed before
+            the new one is placed.
+        source_type: Hazard type tag passed to :func:`add_panic_source`.
+        intensity: Initial source intensity in ``[0, 1]``.
+        radius: Source influence radius in metres.
+        decay_rate: Intensity reduction per simulated second.
+
+    Returns:
+        The updated current :class:`PanicSource` (replaced on place or move),
+        or ``None`` if no events were processed or no source is active.
+    """
+    for event in events:
+        if isinstance(event, PlacePanicSourceEvent):
+            logger.info(
+                "cmd add_panic_source %s %.4f %.4f"
+                " intensity=%.2f radius=%.2f",
+                source_type,
+                event.pos_m[0],
+                event.pos_m[1],
+                intensity,
+                radius,
+            )
+            current_source = add_panic_source(
+                sim,
+                source_type,
+                event.pos_m,
+                intensity=intensity,
+                radius=radius,
+                decay_rate=decay_rate,
+            )
+        elif isinstance(event, MovePanicSourceEvent):
+            if current_source is not None:
+                remove_panic_source(sim, current_source)
+            logger.info(
+                "cmd move_panic_source %s %.4f %.4f"
+                " intensity=%.2f radius=%.2f",
+                source_type,
+                event.pos_m[0],
+                event.pos_m[1],
+                intensity,
+                radius,
+            )
+            current_source = add_panic_source(
+                sim,
+                source_type,
+                event.pos_m,
+                intensity=intensity,
+                radius=radius,
+                decay_rate=decay_rate,
+            )
+    return current_source
