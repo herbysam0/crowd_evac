@@ -39,7 +39,7 @@ package-dir = {"" = "src"}
 find = {include = ["crowd_evac*"]}
 
 [tool.setuptools.package-data]
-crowd_evac = ["assets/scenarios/*.json"]
+crowd_evac = ["py.typed", "assets/scenarios/*.json"]
 
 [tool.mypy]
 strict = true
@@ -73,6 +73,7 @@ python_files = ["test_*.py", "*_test.py"]
 addopts = "-v --tb=short"
 markers = [
     "perf: performance / load tests — excluded from CI by default (run with -m perf)",
+    "render: tests that open a real arcade window (require a display; run with -m render)",
 ]
 filterwarnings = [
     # Third-party (pyglet, pulled in by arcade) uses a CPython API deprecated
