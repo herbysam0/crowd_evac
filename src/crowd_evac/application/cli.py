@@ -18,7 +18,7 @@ import arcade
 
 from crowd_evac.adapters.io.scenario_loader import load_bundled_scenario
 from crowd_evac.adapters.render.arcade_input import ArcadeInputSource
-from crowd_evac.adapters.render.arcade_renderer import ArcadeRenderer
+from crowd_evac.adapters.render.arcade_renderer import AGENT_RADIUS_PX, ArcadeRenderer
 from crowd_evac.application.injection import process_input_events
 from crowd_evac.application.rng import SeededRNG
 from crowd_evac.application.simulation import Simulation
@@ -38,6 +38,104 @@ DEFAULT_SCENARIO: str = "lecture_hall"
 
 WINDOW_TITLE: str = "Crowd Evac"
 """Title bar text for the arcade window."""
+
+_SCREEN_MARGIN: float = 0.90
+"""Fraction of each screen dimension available for the floor plan window.
+
+The remaining 10 % is reserved for the OS taskbar and window chrome so the
+window does not clip against screen edges.
+"""
+
+_MIN_PPM: float = 5.0
+"""Hard lower bound on pixels-per-meter to keep geometry legible."""
+
+
+def _get_logical_screen_size() -> tuple[float, float] | None:
+    """Return the primary monitor size in logical (DPI-scaled) pixels.
+
+    pyglet (and therefore arcade) sizes windows in *logical* coordinates, while
+    :attr:`Screen.width`/``height`` report *physical* pixels.  On a display with
+    DPI scaling these differ by :meth:`Screen.get_scale` (e.g. 1.5 at 150 %), so
+    a window requested at the physical width would overflow the desktop.  This
+    helper divides the physical size by the scale to give the usable logical
+    extent a window can occupy.
+
+    Returns:
+        ``(logical_width, logical_height)`` in pixels, or ``None`` when no
+        screen can be queried (headless CI, virtual framebuffers).
+    """
+    try:
+        screen = arcade.get_screens()[0]
+        scale = screen.get_scale()
+        if scale <= 0.0:
+            scale = 1.0
+        return screen.width / scale, screen.height / scale
+    except Exception:
+        return None
+
+
+def compute_fit_ppm(
+    floor_plan: FloorPlan,
+    *,
+    default_ppm: float = PIXELS_PER_METER,
+    margin: float = _SCREEN_MARGIN,
+) -> float:
+    """Compute pixels-per-meter so the entire floor plan fits on screen.
+
+    Queries the primary monitor's *logical* (DPI-scaled) size via
+    :func:`_get_logical_screen_size` and returns the largest ppm satisfying::
+
+        floor_plan.width_m  * ppm <= logical_width  * margin
+        floor_plan.height_m * ppm <= logical_height * margin
+
+    Logical pixels are used because pyglet/arcade size windows and map their
+    default camera in logical coordinates; sizing against physical pixels would
+    overflow the desktop on any display with DPI scaling > 100 %.
+
+    The result is capped at ``default_ppm`` so small floor plans are never
+    upscaled beyond the configured default, and floored at :data:`_MIN_PPM` so
+    geometry stays legible even on very small screens.
+
+    Falls back to ``default_ppm`` silently when the display cannot be queried
+    (headless CI, virtual framebuffers, etc.).
+
+    Args:
+        floor_plan: Floor plan whose physical dimensions drive the fit.
+        default_ppm: Upper bound for the returned ppm; defaults to the
+            module-level :data:`~crowd_evac.domain.constants.PIXELS_PER_METER`.
+        margin: Fraction of each screen dimension available for the window
+            (default :data:`_SCREEN_MARGIN`).
+
+    Returns:
+        Effective pixels-per-meter in ``[_MIN_PPM, default_ppm]``.
+
+    Example:
+        >>> ppm = compute_fit_ppm(floor_plan, default_ppm=40.0)  # doctest: +SKIP
+        >>> ppm <= 40.0
+        True
+    """
+    size = _get_logical_screen_size()
+    if size is None:
+        logger.debug("Cannot determine screen size; using default ppm %.1f.", default_ppm)
+        return default_ppm
+    screen_w, screen_h = size
+
+    ppm_x = (screen_w * margin) / floor_plan.width_m
+    ppm_y = (screen_h * margin) / floor_plan.height_m
+    fit = min(ppm_x, ppm_y, default_ppm)
+    result = max(fit, _MIN_PPM)
+    if result < default_ppm:
+        logger.info(
+            "Floor plan %.1f×%.1f m exceeds screen at %.0f px/m on %.0f×%.0f "
+            "logical display; scaling to %.2f px/m.",
+            floor_plan.width_m,
+            floor_plan.height_m,
+            default_ppm,
+            screen_w,
+            screen_h,
+            result,
+        )
+    return result
 
 
 def build_simulation_from_scenario(
@@ -116,24 +214,39 @@ class EvacWindow(arcade.Window):
     def __init__(self, sim: Simulation, floor_plan: FloorPlan) -> None:
         """Open a window sized to the floor plan and wire adapters.
 
+        The window size is computed via :func:`compute_fit_ppm` so the entire
+        floor plan — including perimeter walls — is always fully visible within
+        the primary monitor's bounds.
+
         Args:
             sim: Simulation to drive.
             floor_plan: Provides physical dimensions and geometry.
         """
-        width_px = int(floor_plan.width_m * PIXELS_PER_METER)
-        height_px = int(floor_plan.height_m * PIXELS_PER_METER)
+        ppm = compute_fit_ppm(floor_plan)
+        # Scale agent radius proportionally so it stays visually consistent when
+        # ppm is reduced to fit the floor plan on screen.
+        agent_radius_px = max(2, round(AGENT_RADIUS_PX * ppm / PIXELS_PER_METER))
+        width_px = int(floor_plan.width_m * ppm)
+        height_px = int(floor_plan.height_m * ppm)
         super().__init__(width_px, height_px, WINDOW_TITLE)
         self._sim = sim
-        self._renderer = ArcadeRenderer(floor_plan)
+        self._renderer = ArcadeRenderer(
+            floor_plan,
+            pixels_per_meter=ppm,
+            agent_radius_px=agent_radius_px,
+        )
         self._input_source = ArcadeInputSource()
         self._input_source.register(self)
         self._current_source: PanicSource | None = None
         logger.info(
-            "EvacWindow opened: %d×%d px (%.1f×%.1f m).",
+            "EvacWindow opened: %d×%d px at %.2f px/m (%.1f×%.1f m), "
+            "agent_radius=%d px.",
             width_px,
             height_px,
+            ppm,
             floor_plan.width_m,
             floor_plan.height_m,
+            agent_radius_px,
         )
 
     def on_update(self, delta_time: float) -> None:

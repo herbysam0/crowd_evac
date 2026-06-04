@@ -289,6 +289,8 @@ vetted (Windows wheel, maintenance, license) in Step 1.1 before install.
 - **Modify:** agent symbol size should be proportional to pixel per meter, showing diameter of 40 cm.
 - **Fix:** the speed of the events seems not aligned to real time. Explore that and give insights.
 - **Add:** velocity slider, from x0.1 to X3, with snap to x1.
+- **Fix:** when queueing by the exit, any agent not exiting yet is still bound to forces. Currently it looks like many agents are positioned inside the exit and waiting for their turn, and the correct behavior should be that they can't get to the exit because of the density.
+
 
 ### 1.20 Headless end-to-end + seed-repro tests — Sonnet
 - **Do:** `tests/e2e/` — run the default scenario headless to evacuation-complete;
