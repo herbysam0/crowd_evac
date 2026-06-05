@@ -805,22 +805,23 @@ ends in a checkpoint.
 | # | Phase | Objective | Depends on | Priority |
 |---|---|---|---|---|
 | 1 | **MVP — playable loop** | From-scratch 2D core — agent model & movement, crowd dynamics, floor-plan model, single-floor navigation field, exit/egress, fixed-step seeded loop, base render/interaction loop, core metrics (**FR-1..FR-8**) + zero-setup default scenario (FR-0) + one panic source the player can drop/drag with crowd flee + re-route (subset of FR-11/12.1/14) + minimal `arcade` render/UI. **Pin stack (D6).** Spike iGPU rendering at scale (RK-1). Set §8 thresholds empirically here. | D6 | P0 |
-| 2 | Multi-level topology | Levels, transition edges (stairs **and elevators**: capacity, directionality, batch/dwell), queuing, multi-level pathfinding (FR-9) | 1 | P0 |
-| 3 | Panic field & hazards | Full PanicSource types, perception model, spatial gradient with **wall reflection (enclosed mode)**, drift-away force (FR-11) | 1 | P0 |
-| 4 | Signage field | Signage objects, f_goal blend with λ, visibility/occlusion, **runtime panic→trust toggle** (FR-10, R10.3) | 1 | P0 |
-| 5 | Interaction model | Combine a_i terms; conflict handling + stress re-weighting (FR-14) | 2,3,4 | P0 |
-| 6 | Runtime injection | AddPanicSource live; re-route waves (FR-12 R12.1/R12.2) | 3,5 | P0 |
-| 7 | Scenario library | Lecture Hall, Movie Theater, Industrial Plant, Stadium **Tier A** (~10k); all shipped as bundled default data (FR-13, FR-0) | 2,5 | P0 |
-| 8 | UI extensions | Panic editor, signage tool (incl. trust toggle), multi-level navigation view (stairs+elevators overlay) (FR-15) | 5,6,7 | P0 |
-| 9 | Emergent behaviors | EB-1..6 detectors + empirically-set thresholds; observable acceptance run (§8) | all | P0 |
-| 10 | Post-release / stretch | **Secondary panic cascade / rumor wavefront (FR-12 R12.3)**, **Stadium Tier B (≤50k abstracted)** | as needed | P1/P2 |
+| 2 | **Weight optimisation (GA)** | Use a genetic algorithm to optimise the weights of all behavioural rules and force terms (f_exit, f_signage, f_panic_repulsion, f_crowd and per-rule scalars such as λ, panic→trust curve, stair/elevator preference) against an objective function derived from the §8 emergent-behavior metrics (evacuation time, throughput, density peaks, EB-1..6 trigger fidelity). The GA runs headless on the fixed-step sim loop; the fittest weight set becomes the new defaults shipped in R0.3. | 1 | P1 |
+| 3 | Multi-level topology | Levels, transition edges (stairs **and elevators**: capacity, directionality, batch/dwell), queuing, multi-level pathfinding (FR-9) | 1 | P0 |
+| 4 | Panic field & hazards | Full PanicSource types, perception model, spatial gradient with **wall reflection (enclosed mode)**, drift-away force (FR-11) | 1 | P0 |
+| 5 | Signage field | Signage objects, f_goal blend with λ, visibility/occlusion, **runtime panic→trust toggle** (FR-10, R10.3) | 1 | P0 |
+| 6 | Interaction model | Combine a_i terms; conflict handling + stress re-weighting (FR-14) | 3,4,5 | P0 |
+| 7 | Runtime injection | AddPanicSource live; re-route waves (FR-12 R12.1/R12.2) | 4,6 | P0 |
+| 8 | Scenario library | Lecture Hall, Movie Theater, Industrial Plant, Stadium **Tier A** (~10k); all shipped as bundled default data (FR-13, FR-0), automatic generation of scenario from floorplan files | 3,6 | P0 |
+| 9 | UI extensions | Panic editor, signage tool (incl. trust toggle), multi-level navigation view (stairs+elevators overlay) (FR-15) | 6,7,8 | P0 |
+| 10 | Emergent behaviors | EB-1..6 detectors + empirically-set thresholds; observable acceptance run (§8) | all | P0 |
+| 11 | Post-release / stretch | **Secondary panic cascade / rumor wavefront (FR-12 R12.3)**, **Stadium Tier B (≤50k abstracted)** | as needed | P1/P2 |
 
-**Critical path:** 1 (MVP core) → 2 → (3,4 parallel) → 5 → 6 → 7 → 8 → 9. Cascade and Tier B
-(Phase 10) follow release.
+**Critical path:** 1 (MVP core) → 2 (GA weights) → 3 → (4,5 parallel) → 6 → 7 → 8 → 9 → 10. Cascade and Tier B (Phase 11) follow release.
 
 **Model assignments (per project planning rule):** Phase 1 core/spike — Opus (architectural
-fork + scale spike); Phases 2–4 — Sonnet; Phase 5/9 — Opus (interactions / cross-system);
-Phases 6–8 — Sonnet; scaffolding/defaults — Haiku.
+fork + scale spike); Phase 2 (GA optimisation) — Opus (multi-objective fitness design);
+Phases 3–5 — Sonnet; Phase 6/10 — Opus (interactions / cross-system);
+Phases 7–9 — Sonnet; scaffolding/defaults — Haiku.
 
 Phase-level detail (steps, files, success criteria) is produced by `/plan` into
 `docs/plan.md` after approval.

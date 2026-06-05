@@ -2,7 +2,9 @@
 
 Covers:
   - spawn(): agent placement in the walkable region, seed reproducibility
-    (R6.2), count=0 edge case, and ValueError failure paths.
+    (R6.2), count=0 edge case, ValueError failure paths, and the overlap-
+    free invariant (item 14 / step 1.19a): agents never overlap walls,
+    obstacles, or each other at spawn time.
   - AgentState: active_indices, remove(), agent_view().
   - Agent: four-field read-access view (pos, vel, panic, goal).
 """
@@ -12,7 +14,14 @@ import numpy as np
 import pytest
 
 from crowd_evac.domain.agent_state import Agent, AgentState, spawn
-from crowd_evac.domain.floor_plan import Exit, ExitSide, FloorPlan, Wall
+from crowd_evac.domain.constants import AGENT_RADIUS
+from crowd_evac.domain.floor_plan import (
+    Exit,
+    ExitSide,
+    FloorPlan,
+    Obstacle,
+    Wall,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -135,11 +144,17 @@ class TestSpawnHappyPath:
     def test_no_two_agents_same_cell_when_count_le_cells(
         self, simple_floor: FloorPlan
     ) -> None:
-        """When count ≤ n_cells, each agent occupies a distinct cell."""
-        cell_size = 1.0
+        """When count ≤ n_safe_cells, each agent occupies a distinct cell.
+
+        Uses cell_size=2.0 so adjacent cells are 2 m apart, well above the
+        2 * AGENT_RADIUS = 1.1 m exclusion distance.  This means the greedy
+        placement never skips a cell for inter-agent reasons, and the
+        without-replacement cell invariant holds unconditionally.
+        """
+        cell_size = 2.0
         state = spawn(
             simple_floor,
-            count=20,
+            count=5,
             rng=np.random.default_rng(8),
             cell_size=cell_size,
         )
@@ -343,3 +358,122 @@ class TestAgentView:
         """agent_view() must raise IndexError for a negative index."""
         with pytest.raises(IndexError):
             state_10.agent_view(-1)
+
+
+# ---------------------------------------------------------------------------
+# Helpers for overlap tests
+# ---------------------------------------------------------------------------
+
+
+def _min_dist_to_rect(
+    pos: np.ndarray, rx: float, ry: float, rw: float, rh: float
+) -> np.ndarray:
+    """Euclidean distance from each position to a rectangle (vectorised)."""
+    px, py = pos[:, 0], pos[:, 1]
+    dx = np.maximum(rx - px, np.maximum(px - (rx + rw), 0.0))
+    dy = np.maximum(ry - py, np.maximum(py - (ry + rh), 0.0))
+    return np.sqrt(dx**2 + dy**2)  # type: ignore[no-any-return]
+
+
+# ---------------------------------------------------------------------------
+# spawn() — overlap-free invariant (step 1.19a item 14)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def floor_with_obstacle() -> FloorPlan:
+    """10 × 10 room with a 2 × 2 centre obstacle and one south exit.
+
+    Outer walls are 0.5 m thick on all four sides; obstacle sits at (4, 4).
+    """
+    return FloorPlan(
+        width_m=10.0,
+        height_m=10.0,
+        walls=(
+            Wall(x=0.0, y=0.0, width=10.0, height=0.5, label="south"),
+            Wall(x=0.0, y=9.5, width=10.0, height=0.5, label="north"),
+            Wall(x=0.0, y=0.0, width=0.5, height=10.0, label="west"),
+            Wall(x=9.5, y=0.0, width=0.5, height=10.0, label="east"),
+        ),
+        obstacles=(
+            Obstacle(x=4.0, y=4.0, width=2.0, height=2.0, label="pillar"),
+        ),
+        exits=(
+            Exit(
+                x=5.0,
+                y=0.25,
+                width_m=2.0,
+                side=ExitSide.SOUTH,
+                capacity_per_second=5,
+                label="south_exit",
+            ),
+        ),
+    )
+
+
+class TestSpawnNoOverlap:
+    """spawn() must produce an overlap-free initial placement (item 14)."""
+
+    def test_no_agent_agent_overlap(self, simple_floor: FloorPlan) -> None:
+        """All pairwise agent distances must be >= 2 * AGENT_RADIUS."""
+        state = spawn(simple_floor, count=30, rng=np.random.default_rng(10))
+        pos = state.pos  # (30, 2)
+        for i in range(len(pos)):
+            for j in range(i + 1, len(pos)):
+                dx = pos[i, 0] - pos[j, 0]
+                dy = pos[i, 1] - pos[j, 1]
+                dist = (dx * dx + dy * dy) ** 0.5
+                assert dist >= 2.0 * AGENT_RADIUS - 1e-9, (
+                    f"Agents {i} and {j} overlap: distance {dist:.4f} m "
+                    f"< {2 * AGENT_RADIUS:.4f} m"
+                )
+
+    def test_no_agent_wall_overlap(self, simple_floor: FloorPlan) -> None:
+        """Agent centres must be >= AGENT_RADIUS from the south wall surface."""
+        state = spawn(simple_floor, count=30, rng=np.random.default_rng(11))
+        south_wall = simple_floor.walls[0]  # x=0, y=0, w=10, h=1
+        dists = _min_dist_to_rect(
+            state.pos,
+            south_wall.x,
+            south_wall.y,
+            south_wall.width,
+            south_wall.height,
+        )
+        assert (dists >= AGENT_RADIUS - 1e-9).all(), (
+            f"Agents overlap south wall; min distance = {dists.min():.4f} m"
+        )
+
+    def test_no_agent_room_boundary_overlap(
+        self, simple_floor: FloorPlan
+    ) -> None:
+        """Agent centres must be >= AGENT_RADIUS from every room boundary."""
+        state = spawn(simple_floor, count=30, rng=np.random.default_rng(12))
+        pos = state.pos
+        margin = AGENT_RADIUS - 1e-9
+        assert (pos[:, 0] >= margin).all(), "Agent too close to west boundary"
+        assert (pos[:, 0] <= simple_floor.width_m - margin).all(), (
+            "Agent too close to east boundary"
+        )
+        assert (pos[:, 1] >= margin).all(), "Agent too close to south boundary"
+        assert (pos[:, 1] <= simple_floor.height_m - margin).all(), (
+            "Agent too close to north boundary"
+        )
+
+    def test_no_agent_obstacle_overlap(
+        self, floor_with_obstacle: FloorPlan
+    ) -> None:
+        """Agent centres must be >= AGENT_RADIUS from every obstacle surface."""
+        state = spawn(
+            floor_with_obstacle, count=20, rng=np.random.default_rng(13)
+        )
+        pillar = floor_with_obstacle.obstacles[0]  # x=4, y=4, w=2, h=2
+        dists = _min_dist_to_rect(
+            state.pos,
+            pillar.x,
+            pillar.y,
+            pillar.width,
+            pillar.height,
+        )
+        assert (dists >= AGENT_RADIUS - 1e-9).all(), (
+            f"Agents overlap obstacle; min distance = {dists.min():.4f} m"
+        )
