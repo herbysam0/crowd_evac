@@ -109,7 +109,7 @@ Add or override entries to configure the visual size per hazard type.
 
 _SYMBOL_FONTS: tuple[str, ...] = (
     "Segoe UI Emoji",    # Windows 11
-    "Apple Color Emoji", # macOS / iOS
+    "Apple Color Emoji",  # macOS / iOS
     "Noto Color Emoji",  # Linux / Android
 )
 """Font fallback chain for emoji symbol rendering.

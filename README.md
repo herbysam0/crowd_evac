@@ -61,9 +61,20 @@ docs/              # Documentation (PRD, plans)
 ## Gameplay
 
 - **Launch:** `python -m crowd_evac` opens directly into the Lecture Hall scenario
-- **Interact:** Click and drag to place/move a fire source
-- **Watch:** The crowd flees the fire, re-routes around obstacles, and evacuates through exits
-- **Goal:** Observe emergent crowd behavior under a fixed-step seeded simulation
+- **Controls:**
+  - **Click and drag** to place/move a panic source (fire, smoke, etc.)
+  - **Spacebar** to start, pause, or reset the simulation
+- **Watch:** The crowd flees the panic source, re-routes around obstacles, and evacuates through exits
+- **Goal:** Observe emergent crowd behavior and test evacuation effectiveness under a fixed-step seeded simulation
+
+## Simulation Features
+
+- **Deterministic behavior:** Same seed reproduces identical tick-by-tick results
+- **Panic field:** Dynamic influence zone radiating from panic source; agents avoid it
+- **Pathfinding:** Flow-field based navigation with real-time route updates
+- **Exit capacity:** Exits queue agents and enforce realistic evacuation rates
+- **Agent physics:** Collision avoidance, overlap resolution, velocity-based steering
+- **Metrics:** Per-tick counts of active agents, evacuated agents, and panic-induced congestion
 
 ## Development
 
@@ -72,25 +83,41 @@ docs/              # Documentation (PRD, plans)
 ```powershell
 flake8 src/           # PEP 8 linting
 mypy src/ --strict    # Strict type checking
-pytest tests/ -v      # Run all tests
+pytest tests/ -v      # Run all tests (excludes perf, e2e, render)
 pytest tests/ --cov=src --cov-branch --cov-report=term-missing  # Coverage report
+```
+
+### Running Tests by Category
+
+Tests are organized by marker. Default runs exclude performance, end-to-end, and render tests for speed:
+
+```powershell
+# All unit tests only (default, ~5 seconds)
+pytest tests/ -v
+
+# Include end-to-end headless tests
+pytest tests/ -m e2e -v
+
+# Include render tests (requires display)
+pytest tests/ -m render -v
+
+# Run a specific test file
+pytest tests/crowd_evac/domain/test_forces.py -v
 ```
 
 ### Performance Testing
 
-The project has two performance benchmarks targeting the simulation loop.
+The project has two performance benchmarks targeting the simulation loop. These are excluded from default test runs to keep CI fast.
 
 #### Headless load test (no display required)
 
-Runs the full 7-step pipeline (force composition, integration, exit
-resolution) for a range of agent counts and prints a timing table:
+Runs the full simulation pipeline (force composition, integration, exit resolution) for a range of agent counts and prints a timing table:
 
 ```powershell
 pytest tests/ -m perf -v -s
 ```
 
 The `-s` flag passes stdout through so the timing table prints to the console.
-Performance tests are excluded from the default `pytest` run to keep CI fast.
 
 **Sample output:**
 
@@ -104,13 +131,11 @@ Performance tests are excluded from the default `pytest` run to keep CI fast.
    5,000     200     0.xxx     0.xxx     0.xxx     0.xxx      x,xxx       x,xxx,xxx
 ```
 
-Floor: 30 m × 30 m open room, single east exit, 5 force terms enabled,
-seed 42. Run on the target machine and record results in a performance log.
+Floor: 30 m × 30 m open room, single east exit, 5 force terms enabled, seed 42. Run on the target machine and record results in a performance log.
 
 #### Simulation + render load test (requires display)
 
-Opens an arcade window, runs `Simulation.step()` + sprite rendering each
-frame, and reports sim-step cost and draw cost separately:
+Opens an arcade window, runs `Simulation.step()` + sprite rendering each frame, and reports sim-step cost and draw cost separately:
 
 ```powershell
 python scripts/bench_sim_render.py --agents 500
@@ -135,8 +160,7 @@ sim + render benchmark @ 500 agents
   1% low FPS        :    xxx.x
 ```
 
-The render spike (`python scripts/bench_render.py`) remains available
-to isolate pure arcade rendering cost with no simulation logic.
+The render spike (`python scripts/bench_render.py`) isolates pure arcade rendering cost with no simulation logic.
 
 #### Adding load tests
 

@@ -62,6 +62,11 @@ empirical reference data.
   reduced agent count; the winner is re-validated at full Tier A scale (Step
   2.9). Common random numbers across candidates cut comparison variance. This
   guards against overfitting weights to one floor plan or one seed.
+  **Parallelization requirement:** The evaluation harness (Step 2.2) and
+  fitness composite (Step 2.6) must parallelize across available hardware
+  (CPU cores, GPU if available) to minimize wall-clock cost of multi-seed ×
+  multi-scenario runs; NSGA-II population evaluation (Step 2.8) is distributed
+  across all available logical cores. No single evaluation blocks the others.
 - **The optimiser *run* executes offline (background job), not inside a
   session.** Each Phase-2 step below is session-sized (build + unit-test +
   launch/analyse). The multi-hour NSGA-II search itself runs detached and is
@@ -163,7 +168,7 @@ advances only when all three are clean (`flake8=0 mypy=0 pytest=0`).
 # Phase-2 step exit bar — paste the full output (including the RESULT line) back.
 Write-Host "== flake8 =="; flake8 src/; $flake = $LASTEXITCODE
 Write-Host "== mypy ==";   mypy src/ --strict; $mypyc = $LASTEXITCODE
-Write-Host "== pytest =="; pytest tests/ -v; $pytestc = $LASTEXITCODE
+Write-Host "== pytest =="; pytest tests/ -v --ignore=tests/crowd_evac/performance; $pytestc = $LASTEXITCODE
 Write-Host "RESULT flake8=$flake mypy=$mypyc pytest=$pytestc"
 ```
 
@@ -204,7 +209,8 @@ pass/fail at a glance.)
 ### 2.2 Headless evaluation harness — Sonnet
 
 - **Objective:** one call runs a weight set on a scenario to completion and
-  returns the raw signals every metric needs.
+  returns the raw signals every metric needs; support parallel batch evaluation
+  across CPU cores and GPU where available.
 - **Do:** `optimization/harness.py::evaluate(params, scenario, seed,
   max_ticks) -> RunResult`. Builds the `Simulation` from a loaded scenario +
   `params` + seeded RNG, steps until `is_complete` or `max_ticks`, collecting
@@ -213,11 +219,16 @@ pass/fail at a glance.)
   `RunResult` (frozen dataclass / TypedDict): evac_time (s to last egress or
   terminal), evacuated_fraction, throughput series, density series, and a
   compact sampled state history. Hard wall-clock/tick cap so a pathological
-  weight set cannot hang the search.
+  weight set cannot hang the search. Expose a `evaluate_batch(candidates,
+  scenario, seeds) -> list[RunResult]` variant that parallelizes across
+  available cores (thread pool or multiprocessing) — no Python GIL assumptions
+  in the evaluator design.
 - **Files:** `optimization/harness.py`; `tests/optimization/test_harness.py`.
 - **Success:** the bundled Lecture Hall evaluates to completion headless under
   default params; same seed → identical `RunResult`; a deliberately broken param
-  set hits the cap and returns a terminal result rather than hanging.
+  set hits the cap and returns a terminal result rather than hanging;
+  `evaluate_batch()` with N candidates and M seeds runs wall-clock time
+  ≤ 1 serial equivalent run × (N×M) / (available CPU cores).
 
 ### 2.3 Search scenario suite + down-scaling + bottleneck micro-rig — Sonnet
 
@@ -283,20 +294,24 @@ pass/fail at a glance.)
 ### 2.6 Composite fitness — **Opus**
 
 - **Objective:** assemble the optimiser-facing objective/constraint vector with
-  proper noise and generalisation handling.
+  proper noise and generalisation handling; parallelize evaluation across all
+  CPU cores and GPU resources.
 - **Do:** `optimization/fitness.py::evaluate_fitness(params) -> FitnessResult`.
-  For each of K seeds × M suite scenarios (Step 2.3) call the harness, compute
-  realism distance (2.4) and evac time, aggregate (mean + a robustness quantile
-  across seeds), and compute the stuck-agent constraint (2.5). Return the
-  **two objectives** `(realism_distance, evac_time)` and the **constraint**
-  `stuck_count ≤ 0` in the form pymoo expects (objectives to minimise,
-  constraints as `g(x) ≤ 0`). Use common random numbers across candidate
-  evaluations. Make K, M, scale configurable (cheap during search, rich during
-  validation).
+  For each of K seeds × M suite scenarios (Step 2.3) call the harness via the
+  batch evaluator (Step 2.2), compute realism distance (2.4) and evac time,
+  aggregate (mean + a robustness quantile across seeds), and compute the
+  stuck-agent constraint (2.5). Return the **two objectives** `(realism_distance,
+  evac_time)` and the **constraint** `stuck_count ≤ 0` in the form pymoo expects
+  (objectives to minimise, constraints as `g(x) ≤ 0`). Use common random numbers
+  across candidate evaluations. Parallelize all K×M harness runs via the batch
+  evaluator; make K, M, scale, and parallelism level configurable (cheap during
+  search, rich during validation, max-core utilization for production runs).
 - **Files:** `optimization/fitness.py`; `tests/optimization/test_fitness.py`.
 - **Success:** returns a 2-objective + 1-constraint vector of correct shape and
   sign; identical params + seeds → identical result; raising K reduces objective
-  variance (directional); a stuck-prone param set reports a violated constraint.
+  variance (directional); a stuck-prone param set reports a violated constraint;
+  parallel wall-clock time for K×M evaluations is ≤ (K×M / cpu_count) ×
+  single-run time (measured and logged).
 
 ### 2.7 Parameter bounds + sensitivity pre-pass — Sonnet
 
@@ -317,23 +332,28 @@ pass/fail at a glance.)
 
 ### 2.8 NSGA-II driver — **Opus**
 
-- **Objective:** wire and launch the multi-objective search.
+- **Objective:** wire and launch the multi-objective search with maximal
+  hardware utilization (CPU and GPU).
 - **Do:** vet + add `pymoo`. `optimization/nsga.py` — a pymoo `Problem`
   wrapping `evaluate_fitness` (2 objectives, 1 constraint, bounds from 2.7),
-  population evaluation **parallelised across the 12 hardware threads**, and
-  checkpoint/resume to `artifacts/calibration/` (runs are multi-hour).
-  `scripts/optimize_weights.py` launches or resumes a run and writes the Pareto
-  front. The run is started **as a background/offline job**, not awaited in the
-  session.
+  population evaluation **fully parallelised across all available CPU cores and
+  GPU resources** (detect device, dispatch via `evaluate_batch()` in Step 2.6),
+  and checkpoint/resume to `artifacts/calibration/` (runs are multi-hour).
+  `scripts/optimize_weights.py` launches or resumes a run with configurable
+  worker count and device affinity, writes the Pareto front, and logs per-generation
+  wall-clock time + speedup ratio. The run is started **as a background/offline
+  job**, not awaited in the session.
 - **Files:** `optimization/nsga.py`, `scripts/optimize_weights.py`;
   `tests/optimization/test_nsga.py`; `pyproject.toml` (pymoo pinned).
 - **Success:** on a tiny budget (small pop, few generations, mocked/cheap
   fitness) the driver produces a valid non-dominated set and a resumable
   checkpoint; constraint-violating individuals are dominated out; the real
-  launch command starts and detaches cleanly.
+  launch command starts and detaches cleanly; wall-clock speedup for parallel
+  evaluation is ≥ 0.8 × (available cores) vs. serial baseline (logged per generation).
 - **Fallback:** if per-evaluation cost (measured 2.2/2.6) makes a useful NSGA-II
-  population infeasible in available wall-clock, switch to the documented CMA-ES
-  realism-penalised single-objective path (`cma`) behind the same fitness.
+  population infeasible in available wall-clock even with full parallelization,
+  switch to the documented CMA-ES realism-penalised single-objective path (`cma`)
+  behind the same fitness, which has lower population overhead.
 
 ### 2.9 Pareto selection + full-scale validation — **Opus**
 

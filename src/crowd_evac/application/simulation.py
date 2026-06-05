@@ -47,6 +47,7 @@ from crowd_evac.domain.exit_model import ExitModel
 from crowd_evac.domain.overlap import resolve_overlaps
 from crowd_evac.domain.panic_field import PanicField
 from crowd_evac.domain.panic_source import PanicSource
+from crowd_evac.domain.params import ForceParams
 from crowd_evac.pathfinding.flow_field import FlowField
 
 logger = logging.getLogger(__name__)
@@ -158,6 +159,7 @@ class Simulation:
         exit_model: ExitModel,
         rng: SeededRNG,
         *,
+        params: ForceParams = ForceParams.defaults(),
         collision_map: CollisionMap | None = None,
         enable_exit: bool = True,
         enable_crowd: bool = True,
@@ -176,6 +178,9 @@ class Simulation:
             exit_model: Exit capacity and queue manager bound to the same
                 floor plan as ``flow_field``.
             rng: Seeded random generator for any stochastic components.
+            params: Injectable force weights.  Defaults to
+                ``ForceParams.defaults()`` (Phase-1 hand-tuned constants),
+                preserving the pre-Phase-2 baseline behaviour exactly.
             collision_map: Static blocking grid built from the same floor plan;
                 when supplied, integrated positions are clamped each tick so
                 agents never enter a wall or obstacle cell.  ``None`` disables
@@ -196,6 +201,7 @@ class Simulation:
         self.panic_field = panic_field
         self.exit_model = exit_model
         self.rng = rng
+        self._params = params
         self._collision_map = collision_map
 
         self._enable_exit = enable_exit
@@ -277,6 +283,7 @@ class Simulation:
             self.state,
             self.flow_field,
             self.panic_field,
+            params=self._params,
             enable_exit=self._enable_exit,
             enable_crowd=self._enable_crowd,
             enable_density=self._enable_density,
@@ -286,7 +293,13 @@ class Simulation:
 
         # 4. Semi-implicit Euler: update velocities then positions
         prev_pos = self.state.pos.copy()
-        _integrator.step(self.state, accel)
+        _integrator.step(
+            self.state,
+            accel,
+            max_accel=self._params.max_accel,
+            max_speed=self._params.max_speed,
+            panic_speed_multiplier=self._params.panic_speed_multiplier,
+        )
 
         # 5. Reject any move that would cross a wall or obstacle (R1.4 / FR-3)
         if self._collision_map is not None:

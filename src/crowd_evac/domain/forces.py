@@ -49,6 +49,7 @@ from crowd_evac.domain.constants import (
     REPULSION_STRENGTH,
 )
 from crowd_evac.domain.panic_field import PanicField
+from crowd_evac.domain.params import ForceParams
 from crowd_evac.domain.spatial_hash import SpatialHash
 from crowd_evac.pathfinding.flow_field import FlowField
 
@@ -57,6 +58,9 @@ def f_exit(
     state: AgentState,
     field: FlowField,
     relaxation_time: float = RELAXATION_TIME,
+    *,
+    max_speed: float = MAX_SPEED,
+    panic_speed_multiplier: float = PANIC_SPEED_MULTIPLIER,
 ) -> Vec2Array:
     """Compute exit-seeking acceleration for all agents (FR-1 R1.2).
 
@@ -68,7 +72,7 @@ def f_exit(
 
     where::
 
-        v_desired_i = MAX_SPEED * (1 + panic_i * (PANIC_SPEED_MULTIPLIER − 1))
+        v_desired_i = max_speed * (1 + panic_i * (panic_speed_multiplier − 1))
 
     Dead agents (``alive[i] == False``) receive a zero row in the output.
 
@@ -77,6 +81,10 @@ def f_exit(
         field: Pre-computed flow field providing exit-seeking unit directions.
         relaxation_time: Characteristic time in seconds for velocity
             relaxation. Must be positive.
+        max_speed: Base maximum agent speed in m/s for the desired velocity
+            computation. Defaults to the module constant ``MAX_SPEED``.
+        panic_speed_multiplier: Speed boost factor at full panic. Defaults to
+            the module constant ``PANIC_SPEED_MULTIPLIER``.
 
     Returns:
         Float64 array of shape ``(N, 2)`` with per-agent acceleration vectors
@@ -97,10 +105,10 @@ def f_exit(
 
     dirs: npt.NDArray[np.float64] = field.sample(state.pos[active])  # (A, 2)
 
-    # Linearly interpolate desired speed between MAX_SPEED (no panic) and
-    # MAX_SPEED * PANIC_SPEED_MULTIPLIER (full panic).
-    desired_speed: npt.NDArray[np.float64] = MAX_SPEED * (
-        1.0 + state.panic[active] * (PANIC_SPEED_MULTIPLIER - 1.0)
+    # Linearly interpolate desired speed between max_speed (no panic) and
+    # max_speed * panic_speed_multiplier (full panic).
+    desired_speed: npt.NDArray[np.float64] = max_speed * (
+        1.0 + state.panic[active] * (panic_speed_multiplier - 1.0)
     )  # (A,)
 
     desired_vel: Vec2Array = dirs * desired_speed[:, np.newaxis]  # (A, 2)
@@ -393,6 +401,7 @@ def compose(
     field: FlowField,
     panic_field: PanicField,
     *,
+    params: ForceParams | None = None,
     spatial_hash: SpatialHash | None = None,
     enable_exit: bool = True,
     enable_crowd: bool = True,
@@ -412,6 +421,12 @@ def compose(
     from the caller — at the largest radius required by the enabled crowd
     terms, so repulsion, density, and herd share one index build per tick.
 
+    When ``params`` is ``None`` (the default) every force term uses its own
+    constant-derived defaults — behaviour is identical to the pre-Phase-2
+    baseline.  When a :class:`~crowd_evac.domain.params.ForceParams` is
+    supplied each field is forwarded to the corresponding term kwarg, enabling
+    the Phase-2 optimiser to vary weights without mutating module globals.
+
     Phase 4 signage and other future additive terms slot in here without
     touching the integrator.
 
@@ -419,6 +434,8 @@ def compose(
         state: Current agent state (positions, velocities, panic, liveness).
         field: Pre-computed flow field for exit-seeking direction.
         panic_field: Aggregated panic field from active panic sources.
+        params: Optional injectable force weights.  ``None`` uses the
+            Phase-1 constant defaults (behaviour-preserving).
         spatial_hash: Optional pre-built neighbour index whose
             :attr:`~SpatialHash.cell_size` is at least the largest enabled
             crowd-term radius.  When ``None``, one is built automatically.
@@ -434,32 +451,56 @@ def compose(
         Float64 array of shape ``(N, 2)`` with summed accelerations in m/s².
         Dead agents receive zero rows regardless of enabled terms.
     """
+    _p: ForceParams = ForceParams.defaults() if params is None else params
+
     out: Vec2Array = np.zeros((state.count, 2), dtype=np.float64)
 
     if enable_exit:
-        out = out + f_exit(state, field)
+        out = out + f_exit(
+            state,
+            field,
+            _p.relaxation_time,
+            max_speed=_p.max_speed,
+            panic_speed_multiplier=_p.panic_speed_multiplier,
+        )
 
-    # Build one shared spatial hash for all crowd terms that need it.
+    # Build one shared spatial hash for all crowd terms that need it,
+    # using the radii from params so the hash covers all required distances.
     sh: SpatialHash | None = spatial_hash
     if sh is None:
         _needed: list[float] = []
         if enable_crowd:
-            _needed.append(REPULSION_RADIUS)
+            _needed.append(_p.repulsion_radius)
         if enable_density:
-            _needed.append(DENSITY_SENSING_RADIUS)
+            _needed.append(_p.density_sensing_radius)
         if enable_herd:
-            _needed.append(HERD_PERCEPTION_RADIUS)
+            _needed.append(_p.herd_perception_radius)
         if _needed:
             sh = SpatialHash.build(state, max(_needed))
 
     if enable_crowd:
-        out = out + f_crowd(state, sh)
+        out = out + f_crowd(
+            state, sh,
+            radius=_p.repulsion_radius,
+            strength=_p.repulsion_strength,
+        )
     if enable_density:
-        out = out + f_density(state, sh)
+        out = out + f_density(
+            state, sh,
+            radius=_p.density_sensing_radius,
+            threshold=_p.high_density_threshold,
+            strength=_p.density_pressure_strength,
+        )
     if enable_herd:
-        out = out + f_herd(state, sh)
+        out = out + f_herd(
+            state, sh,
+            radius=_p.herd_perception_radius,
+            strength=_p.herd_attraction_strength,
+        )
 
     if enable_panic_repulsion:
-        out = out + f_panic_repulsion(state, panic_field)
+        out = out + f_panic_repulsion(
+            state, panic_field, strength=_p.panic_repulsion_strength
+        )
 
     return out
