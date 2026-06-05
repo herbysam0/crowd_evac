@@ -5,7 +5,8 @@ flow field, panic field, exit model — into a single monotonic fixed-timestep
 loop.  Each call to :meth:`Simulation.step` advances the simulation by one
 ``DT``-second tick following this pipeline:
 
-1. Decay panic sources (``PanicField.decay_all``).
+1. Decay panic sources (``PanicField.decay_all``) and re-solve flow-field
+   hazard blocks for the surviving active sources (``refresh_hazard_blocks``).
 2. Raise each active agent's panic level to at least the panic field value
    at their position (panic propagation).
 3. Compose all enabled force terms (``forces.compose``).
@@ -35,6 +36,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
+import numpy.typing as npt
 
 from crowd_evac.application.rng import SeededRNG
 from crowd_evac.application.termination import is_evacuation_complete
@@ -43,12 +45,18 @@ from crowd_evac.domain import integrator as _integrator
 from crowd_evac.domain.agent_state import AgentState, Bool1D, Float1D, Int1D, Vec2Array
 from crowd_evac.domain.collision import CollisionMap
 from crowd_evac.domain.constants import AGENT_PANIC_DECAY_RATE, DT
+from crowd_evac.domain.errors import PathfindingError
 from crowd_evac.domain.exit_model import ExitModel
 from crowd_evac.domain.overlap import resolve_overlaps
 from crowd_evac.domain.panic_field import PanicField
 from crowd_evac.domain.panic_source import PanicSource
 from crowd_evac.domain.params import ForceParams
-from crowd_evac.pathfinding.flow_field import FlowField
+from crowd_evac.pathfinding.flow_field import (
+    Cell,
+    FlowField,
+    build_danger_field,
+    cells_in_radius,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -213,6 +221,10 @@ class Simulation:
 
         self._tick: int = 0
         self._events: list[SimEvent] = []
+        # Signature of the active navigation-affecting hazards last solved
+        # into the flow field; compared each tick so the field is re-solved
+        # only when the hazard set actually changes (determinism + cost).
+        self._hazard_sig: tuple[tuple[float, float, float, float], ...] = ()
 
     # ------------------------------------------------------------------
     # Read-only properties
@@ -246,7 +258,9 @@ class Simulation:
 
         Pipeline per tick:
 
-        1. Decay all panic sources by ``DT`` seconds.
+        1. Decay all panic sources by ``DT`` seconds, then re-solve the flow
+           field against the current active-hazard block set so cleared
+           hazards restore their footprint (:meth:`refresh_hazard_blocks`).
         2. Propagate panic field values onto agent panic levels (raise to
            at least the field value at each agent's position).
         3. Compose all enabled force terms into per-agent acceleration.
@@ -274,6 +288,11 @@ class Simulation:
 
         # 1. Decay panic sources (intensity decreases over time)
         self.panic_field.decay_all(DT)
+
+        # 1b. Restore/re-solve flow-field blocks for the current active-hazard
+        #     set: a source that just decayed to inactive frees its footprint
+        #     so trapped agents recalculate a route (no-op when unchanged).
+        self.refresh_hazard_blocks()
 
         # 2. Raise agent panic to at least local field value
         self._propagate_panic()
@@ -334,6 +353,80 @@ class Simulation:
             )
 
         return egressed
+
+    # ------------------------------------------------------------------
+    # Hazard navigation blocking
+    # ------------------------------------------------------------------
+
+    def refresh_hazard_blocks(self) -> int:
+        """Re-solve the flow field against the current active-hazard set.
+
+        For every *active* panic source whose
+        :attr:`~crowd_evac.domain.panic_source.PanicSource.blocks_navigation`
+        flag is set, this rebuilds two overlays and re-solves the flow field
+        from the pristine floor mask
+        (:meth:`~crowd_evac.pathfinding.flow_field.FlowField.with_hazards`):
+
+        * a **hard block** of the cells within each hazard's ``block_radius``
+          (its impassable physical core), and
+        * a **soft danger cost** over each hazard's panic ``radius``, scaled by
+          the :class:`~crowd_evac.domain.params.ForceParams`
+          ``hazard_avoidance_cost`` weight, so routes through a hazard become
+          expensive and the crowd diverts to the next-best exit while every
+          cell stays walkable (no zero-direction trap).
+
+        Because the solve starts from the pristine mask, cells freed (and the
+        danger lifted) by a decayed or removed source are **restored** — agents
+        recalculate a route the moment the hazard set changes (FR-4 R4.3/R4.4).
+
+        The method is a no-op when the active-hazard signature is unchanged, so
+        source-less runs and ticks with a stable hazard set leave the
+        flow-field object untouched (preserving determinism). If a re-solve
+        would disconnect every exit the prior field is kept and a warning is
+        logged.
+
+        Returns:
+            Number of hard-blocked cells in the resulting field; the prior
+            count when the set is unchanged or a re-solve was skipped.
+        """
+        sources = [
+            s for s in self.panic_field.sources
+            if s.is_active and s.blocks_navigation
+        ]
+        sig = tuple(
+            sorted((s.x, s.y, s.radius, s.block_radius) for s in sources)
+        )
+        if sig == self._hazard_sig:
+            return len(self.flow_field.blocked)
+
+        shape = self.flow_field.cost.shape
+        cell_size = self.flow_field.cell_size
+        blocked: set[Cell] = set()
+        for s in sources:
+            blocked.update(
+                cells_in_radius((s.x, s.y), s.block_radius, cell_size, shape)
+            )
+        blocked_fs = frozenset(blocked)
+
+        penalty: npt.NDArray[np.float64] | None = None
+        if sources:
+            danger = build_danger_field(
+                shape, cell_size, [(s.x, s.y, s.radius) for s in sources]
+            )
+            penalty = self._params.hazard_avoidance_cost * danger
+
+        try:
+            self.flow_field = self.flow_field.with_hazards(blocked_fs, penalty)
+        except PathfindingError:
+            logger.warning(
+                "Hazard block of %d cells would disconnect all exits; "
+                "flow field unchanged (tick=%d).",
+                len(blocked_fs),
+                self._tick,
+            )
+            return len(self.flow_field.blocked)
+        self._hazard_sig = sig
+        return len(blocked_fs)
 
     # ------------------------------------------------------------------
     # Event log

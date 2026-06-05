@@ -34,6 +34,7 @@ from crowd_evac.domain.exit_model import ExitModel
 from crowd_evac.domain.floor_plan import Exit, ExitSide, FloorPlan
 from crowd_evac.domain.panic_field import PanicField
 from crowd_evac.domain.panic_source import PanicSource
+from crowd_evac.domain.params import ForceParams
 from crowd_evac.pathfinding.flow_field import FlowField
 
 # ---------------------------------------------------------------------------
@@ -406,3 +407,154 @@ class TestRemovePanicSource:
         orphan = PanicSource(x=1.0, y=1.0)
         with pytest.raises(ValueError):
             remove_panic_source(sim, orphan)
+
+
+# ---------------------------------------------------------------------------
+# Hazard-block restoration (regression: blocks were permanent — agents froze)
+# ---------------------------------------------------------------------------
+
+
+class TestHazardBlockRestoration:
+    """A hazard's flow-field block is restored when it decays or is removed.
+
+    Directly guards the diagnosed Phase-1 defect: injected blocks were never
+    cleared, so an agent stranded in the zero-direction region never
+    recalculated a route. With the fix, the flow field re-solves from the
+    pristine mask once the hazard clears.
+    """
+
+    def _blocked_cell(self) -> tuple[int, int]:
+        """Return the (row, col) cell covering the (5.0, 2.5) injection point."""
+        cs = GRID_CELL_SIZE
+        return int(2.5 / cs), int(5.0 / cs)
+
+    def test_decayed_source_restores_blocked_cell(
+        self, one_exit_floor: FloorPlan
+    ) -> None:
+        """Once a source decays to inactive, its blocked cell becomes finite.
+
+        After restoration the flow field also yields a non-zero exit direction
+        at that cell — the agent can seek the exit again (recalculation).
+        """
+        sim = _build_sim(one_exit_floor)
+        r, c = self._blocked_cell()
+        original = float(sim.flow_field.cost[r, c])
+
+        source = add_panic_source(sim, "fire", (5.0, 2.5), decay_rate=5.0)
+        assert not np.isfinite(sim.flow_field.cost[r, c])  # blocked on inject
+
+        # Drain the source to inactivity, then refresh as a tick would.
+        source.intensity = 0.0
+        sim.refresh_hazard_blocks()
+
+        assert sim.flow_field.cost[r, c] == pytest.approx(original)
+        probe = np.array([[5.0, 2.5]])
+        assert np.linalg.norm(sim.flow_field.sample(probe)[0]) > 0.0
+
+    def test_removed_source_restores_blocked_cell(
+        self, one_exit_floor: FloorPlan
+    ) -> None:
+        """Removing a blocking source restores its footprint immediately."""
+        sim = _build_sim(one_exit_floor)
+        r, c = self._blocked_cell()
+        original = float(sim.flow_field.cost[r, c])
+
+        source = add_panic_source(sim, "fire", (5.0, 2.5))
+        assert not np.isfinite(sim.flow_field.cost[r, c])
+
+        remove_panic_source(sim, source)
+
+        assert sim.flow_field.cost[r, c] == pytest.approx(original)
+
+    def test_block_radius_decoupled_from_panic_radius(
+        self, one_exit_floor: FloorPlan
+    ) -> None:
+        """A large panic radius with a small block_radius blocks only the core.
+
+        A cell ~3 m from the source is within the 8 m panic radius but outside
+        the 1 m block footprint, so it must remain reachable — the fix that
+        stops the crowd being engulfed.
+        """
+        sim = _build_sim(one_exit_floor)
+        cs = GRID_CELL_SIZE
+        add_panic_source(
+            sim, "fire", (5.0, 2.5), radius=8.0, block_radius=1.0
+        )
+        # Core cell blocked.
+        assert not np.isfinite(sim.flow_field.cost[int(2.5 / cs), int(5.0 / cs)])
+        # Cell ~3 m away (inside panic radius, outside block radius) reachable.
+        assert np.isfinite(sim.flow_field.cost[int(2.5 / cs), int(2.0 / cs)])
+
+    def test_refresh_is_noop_without_sources(
+        self, one_exit_floor: FloorPlan
+    ) -> None:
+        """Stepping a source-less sim leaves the flow-field object identity.
+
+        Guards determinism: the per-tick refresh must not rebuild the field
+        when the hazard set is empty.
+        """
+        sim = _build_sim(one_exit_floor)
+        before = sim.flow_field
+        sim.step()
+        assert sim.flow_field is before
+
+
+# ---------------------------------------------------------------------------
+# Hazard avoidance routing (fire near one exit -> crowd diverts to the other)
+# ---------------------------------------------------------------------------
+
+
+class TestHazardAvoidanceRouting:
+    """The danger-cost field diverts agents to the next-best exit."""
+
+    def test_fire_near_exit_reroutes_to_other_exit(
+        self, two_exit_floor: FloorPlan
+    ) -> None:
+        """A fire by the east exit flips a mid-room east-bound cell westward.
+
+        With the default (overpowering) avoidance weight, the route through the
+        hazard becomes far more expensive than the westward detour, so agents
+        head for the unobstructed exit — the real-world response.
+        """
+        sim = _build_sim(two_exit_floor)
+        probe = np.array([[6.0, 2.5]])
+        assert sim.flow_field.sample(probe)[0, 0] > 0.0  # east by default
+
+        # Tiny physical core (block_radius 0.1 m) so the divert is driven by
+        # the danger cost over the 4 m panic radius, not the hard block.
+        add_panic_source(
+            sim, "fire", (7.5, 2.5), radius=4.0, block_radius=0.1
+        )
+
+        assert sim.flow_field.sample(probe)[0, 0] < 0.0  # diverted west
+
+    def test_zero_avoidance_weight_keeps_nearest_exit(
+        self, two_exit_floor: FloorPlan
+    ) -> None:
+        """With avoidance disabled the crowd still takes the nearest exit.
+
+        Confirms the rerouting is driven by the danger cost, not the small
+        physical core block: a fire whose core does not reach the exit leaves
+        the east-bound route intact when hazard_avoidance_cost is 0.
+        """
+        rng = SeededRNG(_SEED)
+        flow = FlowField.build(two_exit_floor)
+        state = spawn(two_exit_floor, _N_AGENTS, rng.generator)
+        sim = Simulation(
+            state=state,
+            flow_field=flow,
+            panic_field=PanicField(),
+            exit_model=ExitModel(two_exit_floor),
+            rng=rng,
+            params=ForceParams(hazard_avoidance_cost=0.0),
+        )
+        probe = np.array([[6.0, 2.5]])
+        assert sim.flow_field.sample(probe)[0, 0] > 0.0
+
+        add_panic_source(
+            sim, "fire", (7.5, 2.5), radius=4.0, block_radius=0.1
+        )
+
+        # A 0.1 m core blocks a single cell — not enough to wall the corridor;
+        # with no danger cost the eastward route to the nearer exit survives.
+        assert sim.flow_field.sample(probe)[0, 0] > 0.0

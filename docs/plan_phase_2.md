@@ -79,7 +79,7 @@ empirical reference data.
 ## Decision variables (the weight vector)
 
 The continuous parameters the optimiser searches, all currently in
-`domain/constants.py` (~12 dims — comfortably in CMA-ES / NSGA-II's sweet spot).
+`domain/constants.py` (~13 dims — comfortably in CMA-ES / NSGA-II's sweet spot).
 Bounds below are **deliberately wide** for the abstract behavioural weights —
 the search, not our Phase-1 hand-tuned priors, decides their values; Step 2.7
 tightens around promising regions before the expensive run.
@@ -98,6 +98,14 @@ tightens around promising regions before the expensive run.
 | Panic repulsion | `PANIC_REPULSION_STRENGTH` | `f_panic_repulsion` | 0.0 – 12.0 | gain (wide) |
 | Max accel | `MAX_ACCEL` | integrator | 0.5 – 6.0 m/s² | responsiveness (wide) |
 | Max speed | `MAX_SPEED` | `f_exit` | 1.2 – 1.6 m/s | **physical (narrow)** |
+| Hazard avoidance cost | `HAZARD_AVOIDANCE_COST` | flow-field solve | 0.0 – 100.0 | navigation (wide) |
+
+**Hazard avoidance cost** is a navigation weight (it scales a graded danger
+cost in the flow-field solve so the crowd routes around a hazard to the
+next-best exit), not an additive force term. Its default is deliberately
+overpowering. The hazard-free search suite (Step 2.3) does not exercise it, so
+the Step 2.7 sensitivity pre-pass will read it as non-influential and fix it at
+its default; it is searchable only on hazard scenarios.
 
 **Narrow / fixed by design:** `MAX_SPEED` stays narrow — free-walking speed is
 an empirical physical quantity (~1.34 m/s), and it is also a realism *target*

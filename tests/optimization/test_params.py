@@ -21,6 +21,7 @@ from crowd_evac.domain.agent_state import AgentState, spawn
 from crowd_evac.domain.constants import (
     DENSITY_PRESSURE_STRENGTH,
     DENSITY_SENSING_RADIUS,
+    HAZARD_AVOIDANCE_COST,
     HERD_ATTRACTION_STRENGTH,
     HERD_PERCEPTION_RADIUS,
     HIGH_DENSITY_THRESHOLD,
@@ -143,6 +144,7 @@ class TestForceParamsDefaults:
         assert p.panic_repulsion_strength == PANIC_REPULSION_STRENGTH
         assert p.max_accel == MAX_ACCEL
         assert p.max_speed == MAX_SPEED
+        assert p.hazard_avoidance_cost == HAZARD_AVOIDANCE_COST
 
     def test_defaults_is_frozen(self) -> None:
         """ForceParams instances are frozen; attribute assignment raises."""
@@ -236,6 +238,15 @@ class TestForceParamsValidation:
         """max_speed=0 raises ValueError."""
         with pytest.raises(ValueError, match="max_speed"):
             ForceParams(max_speed=0.0)
+
+    def test_negative_hazard_avoidance_cost_raises(self) -> None:
+        """Negative hazard_avoidance_cost raises ValueError."""
+        with pytest.raises(ValueError, match="hazard_avoidance_cost"):
+            ForceParams(hazard_avoidance_cost=-1.0)
+
+    def test_zero_hazard_avoidance_cost_is_valid(self) -> None:
+        """hazard_avoidance_cost=0 (route by distance only) is valid."""
+        ForceParams(hazard_avoidance_cost=0.0)  # must not raise
 
     def test_zero_strength_fields_are_valid(self) -> None:
         """Strengths of exactly 0.0 are physically valid (term is disabled)."""

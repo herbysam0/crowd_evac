@@ -1,6 +1,6 @@
 """Injectable value object for all tunable behavioural force weights (Phase 2).
 
-:class:`ForceParams` is a frozen dataclass that collects the twelve decision
+:class:`ForceParams` is a frozen dataclass that collects the decision
 variables the Phase-2 optimiser varies.  Every tunable constant from
 ``domain.constants`` becomes an injectable field here; the module constants
 remain the authoritative source for the defaults returned by
@@ -21,6 +21,7 @@ import numpy.typing as npt
 from crowd_evac.domain.constants import (
     DENSITY_PRESSURE_STRENGTH,
     DENSITY_SENSING_RADIUS,
+    HAZARD_AVOIDANCE_COST,
     HERD_ATTRACTION_STRENGTH,
     HERD_PERCEPTION_RADIUS,
     HIGH_DENSITY_THRESHOLD,
@@ -48,6 +49,7 @@ _FIELD_ORDER: tuple[str, ...] = (
     "panic_repulsion_strength",
     "max_accel",
     "max_speed",
+    "hazard_avoidance_cost",
 )
 
 N_PARAMS: int = len(_FIELD_ORDER)
@@ -92,6 +94,11 @@ class ForceParams:
             integrator. Must be > 0.
         max_speed: Base maximum agent speed (m/s) used in ``f_exit`` desired
             velocity and the integrator speed cap. Must be > 0.
+        hazard_avoidance_cost: Strength of hazard route-avoidance in the
+            flow-field solve (the danger-cost multiplier). ``0`` routes by
+            distance only; larger values divert the crowd to the next-best exit
+            around a hazard. Must be >= 0. Unlike the force-term weights this
+            shapes navigation (the flow field), not the additive accelerations.
     """
 
     relaxation_time: float = RELAXATION_TIME
@@ -106,6 +113,7 @@ class ForceParams:
     panic_repulsion_strength: float = PANIC_REPULSION_STRENGTH
     max_accel: float = MAX_ACCEL
     max_speed: float = MAX_SPEED
+    hazard_avoidance_cost: float = HAZARD_AVOIDANCE_COST
 
     def __post_init__(self) -> None:
         """Validate all physical constraints; raise ValueError on violation."""
@@ -125,6 +133,7 @@ class ForceParams:
         )
         _check_positive("max_accel", self.max_accel)
         _check_positive("max_speed", self.max_speed)
+        _check_non_negative("hazard_avoidance_cost", self.hazard_avoidance_cost)
 
     @classmethod
     def defaults(cls) -> ForceParams:
@@ -152,7 +161,7 @@ class ForceParams:
             >>> p = ForceParams.defaults()
             >>> arr = p.to_array()
             >>> arr.shape
-            (12,)
+            (13,)
             >>> arr.dtype
             dtype('float64')
         """

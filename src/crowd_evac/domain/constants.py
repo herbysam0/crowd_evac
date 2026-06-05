@@ -109,6 +109,39 @@ PANIC_REPULSION_STRENGTH: float = 1.5
 GRID_CELL_SIZE: float = 0.25
 """Navigation grid cell size in meters."""
 
+HAZARD_BLOCK_RADIUS: float = 1.5
+"""Radius (m) of the navigation block a hazard punches in the flow field.
+
+The *physical* footprint a hazard makes impassable, deliberately decoupled
+from :data:`PANIC_RANGE` (the much larger radius over which the hazard merely
+*frightens* agents).  A fire occupies roughly its drawn size
+(:data:`FIRE_SYMBOL_SIZE_M` = 3 m diameter → ~1.5 m radius), not its 10 m fear
+radius.  Blocking the full fear radius engulfs the surrounding crowd, stranding
+agents whose every neighbouring cell becomes impassable and who therefore lose
+all exit-seeking direction (the flow field returns a zero vector when every
+neighbour is blocked).  Navigation blocking uses this radius; the panic
+gradient uses :data:`PANIC_RANGE`.
+"""
+
+HAZARD_AVOIDANCE_COST: float = 50.0
+"""Strength of hazard route-avoidance in the flow-field solve (R4.3).
+
+Multiplier on traversal cost at the *centre* of a hazard's panic radius,
+decaying to zero at the radius edge: entering a cell costs
+``base_step * (1 + HAZARD_AVOIDANCE_COST * danger)`` where ``danger`` is the
+normalised proximity to the hazard.  Unlike a hard block it keeps every cell
+walkable (so no agent loses its exit-seeking direction), while making routes
+through a hazard so expensive that agents divert to the next-best exit whenever
+one is reachable.
+
+Deliberately *overpowering* by default: with two exits and a fire by one of
+them, the crowd routes to the other exit (the real-world response).  An agent
+only walks through a hazard when it is the sole way out.  Exposed as the
+:class:`~crowd_evac.domain.params.ForceParams` weight ``hazard_avoidance_cost``
+so it is tunable per scenario and by the Phase-2 optimiser; ``0`` disables
+avoidance (route by distance only).
+"""
+
 # -- Egress/exit dynamics (FR-5: evacuation flow) ----------------------------
 
 EXIT_CAPACITY_PER_SECOND: int = 5
