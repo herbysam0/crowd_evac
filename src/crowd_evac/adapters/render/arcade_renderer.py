@@ -434,15 +434,27 @@ class ArcadeRenderer:
         for exit_ in fp.exits:
             half = exit_.width_m / 2.0
             depth = EXIT_DEPTH_M
-            if exit_.side in (ExitSide.SOUTH, ExitSide.NORTH):
-                # Opening spans along x; depth extends along y
+            if exit_.side == ExitSide.NORTH:
+                # Bottom boundary: rect flush against y=0 (outer face)
                 x0 = (exit_.x - half) * ppm
-                y0 = (exit_.y - depth / 2.0) * ppm + y_off
+                y0 = y_off
                 w = exit_.width_m * ppm
                 h = depth * ppm
+            elif exit_.side == ExitSide.SOUTH:
+                # Top boundary: rect flush against y=height_m (outer face)
+                x0 = (exit_.x - half) * ppm
+                y0 = (fp.height_m - depth) * ppm + y_off
+                w = exit_.width_m * ppm
+                h = depth * ppm
+            elif exit_.side == ExitSide.WEST:
+                # Left boundary: rect flush against x=0 (outer face)
+                x0 = 0.0
+                y0 = (exit_.y - half) * ppm + y_off
+                w = depth * ppm
+                h = exit_.width_m * ppm
             else:
-                # EAST or WEST: opening spans along y; depth extends along x
-                x0 = (exit_.x - depth / 2.0) * ppm
+                # EAST — right boundary: rect flush against x=width_m (outer face)
+                x0 = (fp.width_m - depth) * ppm
                 y0 = (exit_.y - half) * ppm + y_off
                 w = depth * ppm
                 h = exit_.width_m * ppm
