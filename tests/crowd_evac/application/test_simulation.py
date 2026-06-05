@@ -21,7 +21,7 @@ from crowd_evac.application.rng import SeededRNG
 from crowd_evac.application.simulation import SimEvent, SimSnapshot, Simulation
 from crowd_evac.domain.agent_state import AgentState, spawn
 from crowd_evac.domain.collision import CollisionMap
-from crowd_evac.domain.constants import AGENT_RADIUS, DT
+from crowd_evac.domain.constants import AGENT_PANIC_DECAY_RATE, AGENT_RADIUS, DT
 from crowd_evac.domain.overlap import MIN_AGENT_SEPARATION
 from crowd_evac.domain.exit_model import ExitModel
 from crowd_evac.domain.floor_plan import Exit, ExitSide, FloorPlan, Obstacle
@@ -418,6 +418,49 @@ class TestPanicPropagation:
         active = sim_clean.state.active_indices
         if active.size > 0:
             assert np.all(sim_clean.state.panic[active] == 0.0)
+
+    def test_panic_decays_after_source_expires(
+        self, sim_floor: FloorPlan, sim_flow: FlowField
+    ) -> None:
+        """Panic falls by AGENT_PANIC_DECAY_RATE*DT per tick once the source is gone.
+
+        One step with a room-spanning source raises every agent's panic above zero.
+        The source is then cleared and a single additional step is taken.
+        For agents still active, panic must be strictly lower than it was after
+        the exposure tick, proving the decay formula runs (not the old raise-only
+        np.maximum).
+        """
+        source = PanicSource(
+            x=5.0,
+            y=2.5,
+            intensity=1.0,
+            radius=15.0,  # covers the whole 10x5 room
+            decay_rate=0.0,  # pinned at full intensity for the exposure tick
+        )
+        pf = PanicField([source])
+        sim_p = _build_sim(sim_floor, sim_flow, seed=_SEED, panic_field=pf)
+
+        # Step 1: expose all agents — panic rises to field value at each position
+        sim_p.step()
+        active = sim_p.state.active_indices
+        assert active.size > 0, "fixture must have active agents after tick 1"
+        panic_after_exposure = sim_p.state.panic.copy()  # full array for indexing
+        assert np.all(panic_after_exposure[active] > 0.0)
+
+        # Remove source so field is zero everywhere
+        pf.sources.clear()
+
+        # Step 2: one decay tick — each agent's panic must strictly decrease
+        sim_p.step()
+        active2 = sim_p.state.active_indices
+        assert active2.size > 0, "agents should still be active after only 2 ticks"
+        expected_upper = panic_after_exposure[active2] - AGENT_PANIC_DECAY_RATE * DT
+        assert np.all(sim_p.state.panic[active2] <= expected_upper), (
+            "Panic must have decayed by AGENT_PANIC_DECAY_RATE*DT after one "
+            f"source-free tick; delta was too small: "
+            f"before={panic_after_exposure[active2]}, "
+            f"after={sim_p.state.panic[active2]}."
+        )
 
 
 # ---------------------------------------------------------------------------

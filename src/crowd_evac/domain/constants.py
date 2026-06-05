@@ -92,6 +92,15 @@ PANIC_RANGE: float = 10.0
 PANIC_DECAY_RATE: float = 0.02
 """Intensity reduction per second when panic source is active."""
 
+AGENT_PANIC_DECAY_RATE: float = 0.05
+"""Agent panic decay rate in units per second.
+
+When the local panic field value drops below an agent's current panic level
+(because the agent moved outside the influence radius or the source decayed),
+the agent's panic falls toward the field value at this rate rather than
+remaining locked at its peak.
+"""
+
 PANIC_REPULSION_STRENGTH: float = 1.5
 """Scaling factor for panic-gradient repulsion force."""
 

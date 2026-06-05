@@ -285,9 +285,7 @@ vetted (Windows wheel, maintenance, license) in Step 1.1 before install.
 - **Add:** after evacuation is complete the button change to "Reset", pressing it resets the scenario and back to pause. - DONE
 - **Fix:** entire area including all walls MUST be visible on the screen. - DONE
 - **Modify:** emergency influence area should be more transparent. - DONE
-- **Modify:** place symbol of the emergency type in its position, size configurable per type, eg fire symbol size 3 meter.
-- **Fix:** the speed of the events seems not aligned to real time. Explore that and give insights.
-- **Add:** velocity slider, from x0.1 to X3, with snap to x1.
+- **Modify:** place symbol of the emergency type in its position, size configurable per type, eg fire symbol size 3 meter. - DONE
 - **Fix:** agents can NEVER overlap with agents, walls or obstacles. It is calculated by the radius of agents. Examples: distance between agents can never be smaller than 2 times the radius, agent distance from the wall can be smaller than the radius. - DONE
 - **Fix:** mismatch between mouse click position and emergency spawn. - DONE
 - **Fix:** at initial spawn agents overlap other agents, walls and obstacles. - DONE
@@ -310,6 +308,8 @@ vetted (Windows wheel, maintenance, license) in Step 1.1 before install.
   documented lower count). Write findings into this plan's "Spike Results".
 - **Tests:** threshold values land in a config/constants module with a unit test
   asserting they're loaded and in range; benchmark script runs headless+windowed.
+- **Fix:** the speed of the events seems not aligned to real time. Explore that and give insights.
+- **Add:** velocity slider, from x0.1 to X3, with snap to x1.
 
 ### 1.22 Case of no walls
 - **Do:** decide how to solve case of floorplan with no walls or not enclosed (eg 3 walls). Open walls should be treated as exits.

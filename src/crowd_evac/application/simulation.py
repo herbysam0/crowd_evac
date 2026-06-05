@@ -42,7 +42,7 @@ from crowd_evac.domain import forces as _forces
 from crowd_evac.domain import integrator as _integrator
 from crowd_evac.domain.agent_state import AgentState, Bool1D, Float1D, Int1D, Vec2Array
 from crowd_evac.domain.collision import CollisionMap
-from crowd_evac.domain.constants import DT
+from crowd_evac.domain.constants import AGENT_PANIC_DECAY_RATE, DT
 from crowd_evac.domain.exit_model import ExitModel
 from crowd_evac.domain.overlap import resolve_overlaps
 from crowd_evac.domain.panic_field import PanicField
@@ -379,16 +379,25 @@ class Simulation:
     # ------------------------------------------------------------------
 
     def _propagate_panic(self) -> None:
-        """Raise active agents' panic to at least the local panic field value.
+        """Update active agents' panic toward the local panic field value.
 
-        Panic never decreases spontaneously in Phase 1 — only the decay of
-        panic sources (step 1 of each tick) can reduce the field over time,
-        eventually lowering the value that propagates to nearby agents.
+        Panic rises immediately to the field value when an agent is inside
+        an influence radius.  When the field value at an agent's position
+        drops below their current panic — because they moved out of range or
+        the source decayed — their panic decays toward the field value at
+        ``AGENT_PANIC_DECAY_RATE`` per second, never falling below the field
+        value itself.
+
+        ``np.maximum(field_vals, panic - rate * DT)`` handles both cases in
+        one expression: when field_vals >= panic the max selects field_vals
+        (panic rises); when field_vals < panic the max decays panic toward
+        field_vals but never below it.
         """
         active = self.state.active_indices
-        if active.size == 0 or not self.panic_field.sources:
+        if active.size == 0:
             return
         field_vals = self.panic_field.value_at(self.state.pos[active])
         self.state.panic[active] = np.maximum(
-            self.state.panic[active], field_vals
+            field_vals,
+            self.state.panic[active] - AGENT_PANIC_DECAY_RATE * DT,
         )
