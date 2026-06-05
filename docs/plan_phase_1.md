@@ -279,20 +279,18 @@ vetted (Windows wheel, maintenance, license) in Step 1.1 before install.
   without a window (renderer port mocked); starts at tick 0 with agents in range.
 
 ### 1.19a Bugfix after first App entry point
-- **Fix:** agents are able to cross obstacles. Obstacles should NEVER be crossed.
-- **Add:** simulation should begin paused. Add "Evacuate" button to initiate the exit.
-- **Add:** the "Evacuate" button change to "Pause", further pressing "Pause" pauses the app and button change "Continue", and can go back to pause etc.
-- **Add:** after evacuation is complete the button change to "Reset", pressing it resets the scenario and back to pause.
-- **Fix:** entire area including all walls MUST be visible on the screen..
-- **Modify:** emergency influence area should be more transparent.
+- **Fix:** agents are able to cross obstacles. Obstacles should NEVER be crossed. - DONE
+- **Add:** simulation should begin paused. Add "Evacuate" button to initiate the exit. - DONE
+- **Add:** the "Evacuate" button change to "Pause", further pressing "Pause" pauses the app and button change "Continue", and can go back to pause etc. - DONE
+- **Add:** after evacuation is complete the button change to "Reset", pressing it resets the scenario and back to pause. - DONE
+- **Fix:** entire area including all walls MUST be visible on the screen. - DONE
+- **Modify:** emergency influence area should be more transparent. - DONE
 - **Modify:** place symbol of the emergency type in its position, size configurable per type, eg fire symbol size 3 meter.
 - **Fix:** the speed of the events seems not aligned to real time. Explore that and give insights.
 - **Add:** velocity slider, from x0.1 to X3, with snap to x1.
-- **Fix:** agents can NEVER overlap with agents, walls or obstacles. It is calculated by the radius of agents. Examples: distance between agents can never be smaller than 2 times the radius, agent distance from the wall can be smaller than the radius.
-- **Explore:** during emergencies some agents don't move, even though they are not blocked.
-- **Explore:** during emergencies some agents stay in queue when another exit is free nearby.
-- **Fix:** mismatch between mouse click position and emergency spawn.
-- **Fix:** at initial spawn agents overlap other agents, walls and obstacles.
+- **Fix:** agents can NEVER overlap with agents, walls or obstacles. It is calculated by the radius of agents. Examples: distance between agents can never be smaller than 2 times the radius, agent distance from the wall can be smaller than the radius. - DONE
+- **Fix:** mismatch between mouse click position and emergency spawn. - DONE
+- **Fix:** at initial spawn agents overlap other agents, walls and obstacles. - DONE
 
 
 

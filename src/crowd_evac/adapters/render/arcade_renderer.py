@@ -43,7 +43,11 @@ from typing import TYPE_CHECKING
 import arcade
 from arcade.types import RGBA255
 
-from crowd_evac.domain.constants import AGENT_RADIUS, PIXELS_PER_METER
+from crowd_evac.domain.constants import (
+    AGENT_RADIUS,
+    FIRE_SYMBOL_SIZE_M,
+    PIXELS_PER_METER,
+)
 from crowd_evac.domain.floor_plan import ExitSide, FloorPlan
 from crowd_evac.domain.panic_source import PanicSource
 
@@ -79,6 +83,40 @@ EXIT_COLOR: RGBA255 = (55, 190, 75, 220)
 
 PANIC_SOURCE_COLOR: RGBA255 = (235, 110, 25, 100)
 """Panic source base colour (orange); alpha is scaled by source intensity."""
+
+# ---------------------------------------------------------------------------
+# Emergency symbol configuration
+# ---------------------------------------------------------------------------
+
+_SYMBOL_CHAR: dict[str, str] = {
+    "fire": "\U0001f525",  # U+1F525 FIRE — rendered by Segoe UI Emoji on Windows 11
+}
+"""Maps source_type → Unicode character drawn at the hazard position.
+
+Each entry is rendered by :meth:`ArcadeRenderer._draw_panic_sources` using the
+OS emoji font.  Add entries here to support additional hazard types.
+"""
+
+_SYMBOL_SIZE_M: dict[str, float] = {
+    "fire": FIRE_SYMBOL_SIZE_M,
+}
+"""Maps source_type → symbol world-space diameter in metres.
+
+The rendered symbol is scaled to ``size_m × pixels_per_meter`` pixels on each
+call so it stays fixed in world space regardless of the rendering scale.
+Add or override entries to configure the visual size per hazard type.
+"""
+
+_SYMBOL_FONTS: tuple[str, ...] = (
+    "Segoe UI Emoji",    # Windows 11
+    "Apple Color Emoji", # macOS / iOS
+    "Noto Color Emoji",  # Linux / Android
+)
+"""Font fallback chain for emoji symbol rendering.
+
+Pyglet tries each name in order; the first one found by the OS is used.
+The chain covers Windows, macOS, and common Linux emoji fonts.
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -413,11 +451,18 @@ class ArcadeRenderer:
     def _draw_panic_sources(
         self, sources: tuple[PanicSource, ...]
     ) -> None:
-        """Draw active panic sources as semi-transparent orange circles.
+        """Draw active panic sources: influence circle + hazard symbol.
 
-        The circle radius scales with ``source.radius × intensity`` (metres →
-        pixels) so it visually shrinks as the source decays.  Alpha is also
-        scaled by intensity so expired sources fade before disappearing.
+        Each active source is rendered as two layers:
+
+        1. A semi-transparent orange circle whose radius scales with
+           ``source.radius × intensity`` so it visually shrinks as the source
+           decays.  Alpha is also scaled by intensity so expired sources fade
+           before disappearing.
+        2. A hazard-type symbol (e.g. 🔥 for ``source_type="fire"``) drawn
+           centred at the source position using the OS emoji font.  Symbol size
+           is looked up from :data:`_SYMBOL_SIZE_M` (world-space metres),
+           defaulting to 1 m when the type is not registered.
 
         Args:
             sources: Panic sources from the current snapshot (read-only).
@@ -431,12 +476,28 @@ class ArcadeRenderer:
             intensity = max(0.0, min(1.0, src.intensity))
             alpha = int(PANIC_SOURCE_COLOR[3] * intensity)
             color: RGBA255 = (r_base, g_base, b_base, alpha)
+            cx_px = src.x * ppm
+            cy_px = src.y * ppm + y_off
             arcade.draw_circle_filled(
-                src.x * ppm,
-                src.y * ppm + y_off,
+                cx_px,
+                cy_px,
                 src.radius * intensity * ppm,
                 color,
             )
+            symbol = _SYMBOL_CHAR.get(src.source_type)
+            if symbol is not None:
+                size_m = _SYMBOL_SIZE_M.get(src.source_type, 1.0)
+                font_size_px = int(size_m * ppm)
+                arcade.draw_text(
+                    symbol,
+                    cx_px,
+                    cy_px,
+                    arcade.color.WHITE,
+                    font_size=font_size_px,
+                    font_name=_SYMBOL_FONTS,
+                    anchor_x="center",
+                    anchor_y="center",
+                )
 
     def _sync_and_draw_agents(self, snapshot: SimSnapshot) -> None:
         """Synchronise the agent sprite list to snapshot state and draw it.

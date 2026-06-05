@@ -127,3 +127,11 @@ considered trapped and
 
 PIXELS_PER_METER: float = 40.0
 """Display scaling factor for rendering (pixels per meter)."""
+
+FIRE_SYMBOL_SIZE_M: float = 3.0
+"""World-space diameter (m) at which the fire emergency symbol is drawn.
+
+Scales proportionally with pixels_per_meter, so a 3 m symbol occupies
+3 × pixels_per_meter pixels on screen.  Adjust to match the visual footprint
+of the hazard type.
+"""

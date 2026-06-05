@@ -50,6 +50,8 @@ class PanicSource:
         intensity: Current source intensity in ``[0, 1]``.
         radius: Influence radius in metres.  Must be positive.
         decay_rate: Intensity reduction per simulated second.  Must be >= 0.
+        source_type: Hazard type tag (e.g. ``"fire"``).  Selects the
+            symbol rendered at the source position.  Unused by domain logic.
     """
 
     x: float
@@ -57,6 +59,8 @@ class PanicSource:
     intensity: float = 1.0
     radius: float = PANIC_RANGE
     decay_rate: float = PANIC_DECAY_RATE
+    source_type: str = "fire"
+    """Human-readable hazard type tag used for symbol selection and logging."""
 
     def __post_init__(self) -> None:
         """Validate field constraints on construction.

@@ -100,6 +100,7 @@ def add_panic_source(
         intensity=intensity,
         radius=radius,
         decay_rate=decay_rate,
+        source_type=source_type,
     )
     sim.panic_field.add_source(source)
 

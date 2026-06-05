@@ -15,7 +15,6 @@ No framework or I/O imports — pure Python + NumPy.
 from __future__ import annotations
 
 import logging
-import math
 from dataclasses import dataclass
 from typing import TypeAlias, cast
 
