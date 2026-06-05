@@ -87,7 +87,7 @@ vetted (Windows wheel, maintenance, license) in Step 1.1 before install.
 | 1.18 | Bundled Lecture Hall default scenario data | scenarios, assets | FR-0, FR-13.1 | Haiku |
 | 1.19 | App entry point: launch into Lecture Hall, run loop | application/cli | FR-0 R0.1 | Sonnet |
 | 1.20 | Headless end-to-end + seed-repro tests | tests | FR-6 R6.1, FR-5 R5.3 | Sonnet |
-| 1.21 | Tune defaults, set §8 thresholds, 10k benchmark, document fallback | — | §8, NFR-P2/P3 | Opus |
+| 1.21 | Initial documentation | docs | — | Haiku |
 
 **Dependencies:** 1.1→1.2→{1.3 (independent spike)}; 1.4→1.5; {1.6}→1.7 (needs 1.5);
 1.7→1.8; 1.9 needs 1.6; 1.10 needs 1.4/1.6; 1.11 needs 1.7/1.8/1.10; 1.12 needs
@@ -299,29 +299,8 @@ vetted (Windows wheel, maintenance, license) in Step 1.1 before install.
   (R6.1). Coverage pass to ≥ 85% on core/capability modules (NFR-Q1).
 - **Tests:** the above; `pytest --cov=src --cov-branch` ≥ 85%; fill gaps.
 
-### 1.21 Tune defaults, set §8 thresholds, 10k benchmark, document fallback — Opus
-- **Do:** run on the **target laptop**; tune default parameters for a readable,
-  fun loop; **empirically set the §8 EB thresholds** now that baseline scales are
-  observed (PRD §8 — no preset numbers); benchmark combined sim+render at ~2k and
-  ~10k; record FPS, re-route latency (NFR-P3 ≤ 200 ms), footprint (NFR-P4 ≤ 6 GB);
-  document the NFR-P2 fallback decision (instanced/active-level draw → sprite LOD →
-  documented lower count). Write findings into this plan's "Spike Results".
-- **Tests:** threshold values land in a config/constants module with a unit test
-  asserting they're loaded and in range; benchmark script runs headless+windowed.
-- **Fix:** the speed of the events seems not aligned to real time. Explore that and give insights.
-- **Add:** velocity slider, from x0.1 to X3, with snap to x1.
-
-### 1.22 Case of no walls
-- **Do:** decide how to solve case of floorplan with no walls or not enclosed (eg 3 walls). Open walls should be treated as exits.
-
-### 1.23 Limited knowledge
-- **Do:** decide how to reflect agents not knowing where the emergency exit is (eg no sign in sight). Possible it to follow the herd.
-
-### 1.24 Spawn region
-- **Do:** define spawn region within the walkable region. For example, in stadium spawn aget in the seating areas but not in the hall areas.
-
-### 1.25 Initial Documentation
-- **Do:** update readme.md and PRD.md according to the latest implementation. Include UML diagrams..
+### 1.21 Initial Documentation
+- **Do:** update readme.md and PRD.md according to the latest implementation. Include UML diagrams. The sequence diagram should be detailed to the function / method level.
 
 ---
 

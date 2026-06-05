@@ -509,7 +509,72 @@ it.
   - AC: tabs switch the active level; minimap shows all levels stacked; overlay shows
     transition edges (stairs + elevators); per-level heatmap renders density (default) with
     a toggle to panic.
-- **R15.4 CLI** — all UI commands log INFO with their syntax, so the user can copy them as CLI commands. The app will receive CLI commands for all its UI commands..
+- **R15.4 CLI** — all UI commands log INFO with their syntax, so the user can copy them as CLI commands. The app will receive CLI commands for all its UI commands.
+
+### FR-16 Open-Plan Floor Handling (Phase 3) — P0
+
+Accommodate floor plans with no walls or incomplete enclosure (e.g., 3 walls, open regions).
+
+- **R16.1** Detect and handle floor plans where the walkable region has no enclosing walls
+  (e.g., outdoor scenario, open-plan space, or incomplete building geometry).
+  - AC: a floor plan with zero walls loads and agents default to the nearest/lowest-cost
+    exit; no crash or undefined behavior.
+- **R16.2** Treat open boundaries (edges without walls) as implicit exits or valid
+  navigation targets.
+  - AC: agents can navigate to and egress through open edges; the simulation terminates
+    normally when all agents have exited or reached stable equilibrium.
+
+### FR-17 Limited Agent Wayfinding Knowledge (Phase 3) — P0
+
+Model agents with incomplete knowledge of exit locations (e.g., no signage visible, agent has not yet observed the exit).
+
+- **R17.1** Agents may initially not know the location of the nearest exit; they rely on
+  herd behavior (attraction to nearby agents moving toward an exit) to discover exits
+  transitively.
+  - AC: an isolated agent in an unknown room exhibits exploratory behavior (random walk or
+    herd-based drift) until it encounters the exit or observes another agent moving toward
+    it; once an exit is discovered, the agent routes toward it (FR-4 field).
+- **R17.2** Signage presence (FR-10) acts as a knowledge-sharing mechanism: agents near
+  visible signage gain knowledge of that direction, and herd behavior propagates this
+  discovery outward.
+  - AC: placing a sign causes nearby agents to orient/herd toward it; agents further away
+    gradually join the flow as herd attraction propagates.
+
+### FR-18 Configurable Spawn Region (Phase 3) — P0
+
+Allow scenario designers to define agent spawn zones within the walkable region (e.g., seating areas in a stadium, not aisles).
+
+- **R18.1** Floor plans include a **spawn region** definition (a subset of the walkable
+  region) where agents are initially placed during scenario load.
+  - AC: a scenario specifies spawn region(s) via the scenario file (JSON); agents are
+    seeded only within those regions (FR-1 R1.1 / 1.4).
+- **R18.2** Multi-region spawn support: a scenario may define multiple disjoint spawn regions
+  (e.g., stadium seating tiers, theater rows) and optionally weight them.
+  - AC: agents distribute across spawn regions per scenario definition; if unspecified, spawn
+    defaults to the entire walkable region.
+
+### FR-19 Real-Time Simulation Scale Tuning & Velocity Control (Phase 3) — P0
+
+Empirically tune emergent-behavior thresholds and provide player control over simulation speed.
+
+- **R19.1** On release of Phase 1, run the baseline simulation on the target laptop and
+  **empirically set the §8 EB-1..6 threshold values** (no preset numbers; tuned from
+  observed behavior) and document Tier A performance (FPS, latency, memory) and fallback
+  strategy (NFR-P2).
+  - AC: all §8 thresholds (e.g., "panic triggers collapse at density > X") are documented
+    constants and verified by unit tests; Phase 1 §8 results are written to the plan.
+- **R19.2** **Velocity slider** — provide a runtime UI slider to adjust simulation speed from
+  **0.1× (slow-motion)** to **3.0× (fast-forward)** with snap-to-1.0× (real-time).
+  - AC: dragging the slider changes the per-tick time dilation factor; agents appear to move
+    slower/faster accordingly; the snap point (1.0×) represents real-world evacuation speed.
+- **R19.3** Address and resolve the observed **timing mismatch between simulation and real-world
+  time**: inspect whether default force weights, speed caps, or `dt` are calibrated to match
+  expected human evacuation speeds; document findings and adjust if needed.
+  - AC: with velocity slider at 1.0×, agent movement speed approximately matches real-world
+    human evacuation speed (empirically defined for the chosen force model); this calibration
+    is documented and tunable.
+
+---
 
 
 ---

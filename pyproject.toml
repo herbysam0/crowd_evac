@@ -74,6 +74,7 @@ addopts = "-v --tb=short"
 markers = [
     "perf: performance / load tests — excluded from CI by default (run with -m perf)",
     "render: tests that open a real arcade window (require a display; run with -m render)",
+    "e2e: full evacuation end-to-end runs; takes a few seconds (run with -m e2e)",
 ]
 filterwarnings = [
     # Third-party (pyglet, pulled in by arcade) uses a CPython API deprecated
