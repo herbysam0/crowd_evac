@@ -37,10 +37,16 @@ from crowd_evac.adapters.io.scenario_loader import (
     load_bundled_scenario,
     load_scenario_file,
 )
+from crowd_evac.application.injection import add_panic_source
 from crowd_evac.application.rng import SeededRNG
 from crowd_evac.application.simulation import Simulation
 from crowd_evac.domain.agent_state import spawn
 from crowd_evac.domain.collision import CollisionMap
+from crowd_evac.domain.constants import (
+    HAZARD_BLOCK_RADIUS,
+    PANIC_DECAY_RATE,
+    PANIC_RANGE,
+)
 from crowd_evac.domain.exit_model import ExitModel
 from crowd_evac.domain.panic_field import PanicField
 from crowd_evac.domain.params import ForceParams
@@ -52,7 +58,7 @@ if TYPE_CHECKING:
 
     from crowd_evac.application.simulation import SimSnapshot
     from crowd_evac.domain.floor_plan import FloorPlan
-    from crowd_evac.scenarios.schema import ScenarioData
+    from crowd_evac.scenarios.schema import EmergencyEventData, ScenarioData
 
 logger = logging.getLogger(__name__)
 
@@ -143,7 +149,12 @@ def evaluate(
     compact sampled state history.
 
     The same (*params*, *scenario*, *seed*) triple always produces a
-    bit-identical :class:`RunResult` — the run is fully deterministic.
+    bit-identical :class:`RunResult` — the run is fully deterministic.  Any
+    ``events`` declared in the scenario file (scripted emergencies) are part of
+    that determinism: each is injected via
+    :func:`~crowd_evac.application.injection.add_panic_source` at its scheduled
+    tick, driving panic and (when it blocks navigation) re-routing the crowd —
+    this is how ``hazard_avoidance_cost`` is exercised in headless validation.
 
     Args:
         params: Force-weight configuration to evaluate.
@@ -171,6 +182,7 @@ def evaluate(
     """
     floor_plan, scenario_data = _load_scenario(scenario)
     sim, initial_count = _build_sim(floor_plan, scenario_data, params, seed)
+    events_by_tick = _events_by_tick(scenario_data.get("events", []))
 
     throughput: list[int] = []
     density: list[float] = []
@@ -203,6 +215,12 @@ def evaluate(
                 seed,
             )
             break
+
+        # Fire any scripted emergency events scheduled for the current tick
+        # before stepping, so the injected source is active for this step's
+        # panic-decay/propagation phase (matching live injection semantics).
+        if events_by_tick:
+            _apply_due_events(sim, events_by_tick)
 
         sim.step()
         tick_count += 1
@@ -336,6 +354,41 @@ def evaluate_batch(
     return results
 
 
+def rerouted_flow_field(
+    scenario: str | Path,
+    params: ForceParams,
+    seed: int = 0,
+) -> FlowField:
+    """Return the flow field after applying every scenario hazard block.
+
+    Builds the scenario's simulation and applies *all* of its scripted events
+    immediately (their navigation blocks and the graded danger cost scaled by
+    ``params.hazard_avoidance_cost``), then returns the resulting re-routed
+    field.  This is the field agents navigate while the hazard is active, so it
+    is the correct reference for stuck-detection on a hazard run — unlike the
+    base, hazard-free field used by the composite fitness (Step 2.6).
+
+    The block geometry depends only on the floor plan, the hazards, and
+    ``params``; it is independent of *seed* (which only affects agent spawning),
+    so any seed yields the same field.
+
+    Args:
+        scenario: Bundled scenario name or filesystem path (see :func:`evaluate`).
+        params: Force-weight configuration (supplies ``hazard_avoidance_cost``).
+        seed: Spawn seed; irrelevant to the returned field.
+
+    Returns:
+        The re-routed :class:`~crowd_evac.pathfinding.flow_field.FlowField`.
+        Equal to the base field when the scenario declares no events (or when a
+        block would disconnect all exits, which the injector declines).
+    """
+    floor_plan, scenario_data = _load_scenario(scenario)
+    sim, _ = _build_sim(floor_plan, scenario_data, params, seed)
+    for event in scenario_data.get("events", []):
+        _apply_event(sim, event)
+    return sim.flow_field
+
+
 # ---------------------------------------------------------------------------
 # Module-level process-pool worker
 # ---------------------------------------------------------------------------
@@ -392,6 +445,64 @@ def _load_scenario(scenario: str | Path) -> tuple[FloorPlan, ScenarioData]:
     raise TypeError(
         f"scenario must be str (bundled name) or Path (file path), "
         f"got {type(scenario).__name__!r}"
+    )
+
+
+def _events_by_tick(
+    events: list[EmergencyEventData],
+) -> dict[int, list[EmergencyEventData]]:
+    """Group scenario events by their firing tick, preserving listed order.
+
+    Args:
+        events: The scenario's validated event list (possibly empty).
+
+    Returns:
+        Mapping of firing tick to the events scheduled at that tick, in the
+        order they appear in the scenario file.  Empty when ``events`` is empty.
+    """
+    by_tick: dict[int, list[EmergencyEventData]] = {}
+    for event in events:
+        by_tick.setdefault(event["tick"], []).append(event)
+    return by_tick
+
+
+def _apply_due_events(
+    sim: Simulation,
+    events_by_tick: dict[int, list[EmergencyEventData]],
+) -> None:
+    """Inject every event scheduled for the simulation's current tick.
+
+    Args:
+        sim: Running simulation; mutated in-place by each injection.
+        events_by_tick: Tick-grouped event schedule from
+            :func:`_events_by_tick`.
+    """
+    for event in events_by_tick.get(sim.tick, ()):
+        _apply_event(sim, event)
+
+
+def _apply_event(sim: Simulation, event: EmergencyEventData) -> None:
+    """Translate one scenario event into a panic-source injection.
+
+    Optional event fields fall back to the same domain-constant defaults used
+    by :func:`~crowd_evac.application.injection.add_panic_source`, so an event
+    that specifies only ``tick``/``type``/``pos`` reproduces a default-strength
+    hazard.
+
+    Args:
+        sim: Running simulation to inject into.
+        event: A single validated emergency event.
+    """
+    pos = (event["pos"][0], event["pos"][1])
+    add_panic_source(
+        sim,
+        event.get("source_type", "fire"),
+        pos,
+        intensity=event.get("intensity", 1.0),
+        radius=event.get("radius", PANIC_RANGE),
+        block_radius=event.get("block_radius", HAZARD_BLOCK_RADIUS),
+        decay_rate=event.get("decay_rate", PANIC_DECAY_RATE),
+        block_cells=event.get("blocks_navigation", True),
     )
 
 

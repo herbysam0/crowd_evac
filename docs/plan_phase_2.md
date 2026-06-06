@@ -365,14 +365,14 @@ pass/fail at a glance.)
 
 ### 2.9 Pareto selection + full-scale validation — **Opus**
 
-- **Objective:** pick the one weight set to ship and prove it holds at Tier A.
+- **Objective:** pick the one weight set to ship and prove it holds at Tier A. Should be ready for future optimizations.
 - **Do:** `optimization/select.py::choose(front) -> ForceParams` — apply the
   **realism-gated rule**: among non-dominated points with realism_distance ≤ the
   Step-2.4 threshold **and** stuck_count == 0, pick minimum evac_time (knee as a
   tie-break/secondary report). Re-validate the winner at **full Tier A agent
   count** across the full (non-down-scaled) suite and extra held-out seeds; if it
   regresses (realism or stuck-count) at scale, record it and step back to the
-  next front point.
+  next front point. Also leave a working procedure for future running of the optimization again, by the user.
 - **Files:** `optimization/select.py`; `scripts/validate_weights.py`;
   `tests/optimization/test_select.py`.
 - **Success:** selection returns a single `ForceParams`; on a synthetic front it

@@ -18,12 +18,14 @@ import pytest
 
 from crowd_evac.domain.params import ForceParams
 from crowd_evac.optimization.harness import (
-    DEFAULT_HISTORY_INTERVAL,
     RunResult,
+    _events_by_tick,
     _load_scenario,
     evaluate,
     evaluate_batch,
+    rerouted_flow_field,
 )
+from crowd_evac.pathfinding.flow_field import FlowField
 
 # ---------------------------------------------------------------------------
 # Constants shared across tests
@@ -357,3 +359,133 @@ class TestLoadScenario:
         """A non-str/non-Path argument raises TypeError."""
         with pytest.raises(TypeError, match="scenario must be str"):
             _load_scenario(42)  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# Scripted emergency-event injection (Phase 2, Step 2.9)
+# ---------------------------------------------------------------------------
+
+
+def _scenario_with_event(tick: int, pos: list[float]) -> dict[str, object]:
+    """Build a minimal scenario dict carrying one place_panic_source event."""
+    return {
+        "schema_version": "1.0",
+        "name": "tmp_hazard",
+        "floor_plan": {
+            "width_m": 12.0,
+            "height_m": 8.0,
+            "walls": [],
+            "obstacles": [],
+            "exits": [
+                {"x": 12.0, "y": 4.0, "width_m": 2.0, "side": "east",
+                 "capacity_per_second": 10, "label": "main"},
+            ],
+        },
+        "agents": {"count": 6, "spawn_seed": 7},
+        "simulation": {"dt": 0.05, "max_ticks": 5000},
+        "events": [
+            {"tick": tick, "type": "place_panic_source", "pos": pos},
+        ],
+    }
+
+
+class TestEventsByTick:
+    """_events_by_tick grouping behaviour."""
+
+    def test_empty_events_yield_empty_map(self) -> None:
+        """No events produce an empty schedule."""
+        assert _events_by_tick([]) == {}
+
+    def test_groups_by_tick(self) -> None:
+        """Events are grouped under their firing tick."""
+        events = [
+            {"tick": 5, "type": "place_panic_source", "pos": [1.0, 1.0]},
+            {"tick": 5, "type": "place_panic_source", "pos": [2.0, 2.0]},
+            {"tick": 9, "type": "place_panic_source", "pos": [3.0, 3.0]},
+        ]
+        grouped = _events_by_tick(events)  # type: ignore[arg-type]
+        assert set(grouped) == {5, 9}
+        assert len(grouped[5]) == 2
+        assert len(grouped[9]) == 1
+
+    def test_preserves_listed_order_within_tick(self) -> None:
+        """Events on the same tick keep their file order."""
+        events = [
+            {"tick": 1, "type": "place_panic_source", "pos": [1.0, 1.0]},
+            {"tick": 1, "type": "place_panic_source", "pos": [2.0, 2.0]},
+        ]
+        grouped = _events_by_tick(events)  # type: ignore[arg-type]
+        assert grouped[1][0]["pos"] == [1.0, 1.0]
+        assert grouped[1][1]["pos"] == [2.0, 2.0]
+
+
+class TestEventInjection:
+    """evaluate() fires scenario events through add_panic_source."""
+
+    def test_event_triggers_injection(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A scenario event invokes add_panic_source once at its tick."""
+        calls: list[tuple[str, tuple[float, float]]] = []
+
+        def _spy(sim: object, source_type: str,
+                 pos: tuple[float, float], **kwargs: object) -> None:
+            calls.append((source_type, pos))
+
+        monkeypatch.setattr(
+            "crowd_evac.optimization.harness.add_panic_source", _spy
+        )
+        scenario = tmp_path / "hazard.json"
+        scenario.write_text(
+            json.dumps(_scenario_with_event(2, [6.0, 4.0])), encoding="utf-8"
+        )
+        evaluate(ForceParams.defaults(), scenario, _SEED, max_ticks=20)
+        assert len(calls) == 1
+        assert calls[0][0] == "fire"
+        assert calls[0][1] == (6.0, 4.0)
+
+    def test_event_before_cap_not_fired(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An event scheduled past the tick cap never fires."""
+        calls: list[object] = []
+        monkeypatch.setattr(
+            "crowd_evac.optimization.harness.add_panic_source",
+            lambda *a, **k: calls.append(1),
+        )
+        scenario = tmp_path / "late_hazard.json"
+        scenario.write_text(
+            json.dumps(_scenario_with_event(500, [6.0, 4.0])), encoding="utf-8"
+        )
+        evaluate(ForceParams.defaults(), scenario, _SEED, max_ticks=5)
+        assert calls == []
+
+    def test_event_run_is_deterministic(self, tmp_path: Path) -> None:
+        """Same seed + scenario events → identical RunResult (positions)."""
+        scenario = tmp_path / "det_hazard.json"
+        scenario.write_text(
+            json.dumps(_scenario_with_event(1, [6.0, 4.0])), encoding="utf-8"
+        )
+        r1 = evaluate(ForceParams.defaults(), scenario, _SEED, max_ticks=30)
+        r2 = evaluate(ForceParams.defaults(), scenario, _SEED, max_ticks=30)
+        assert r1.evac_time == r2.evac_time
+        assert np.array_equal(r1.positions_history, r2.positions_history)
+
+
+class TestRerouteFlowField:
+    """rerouted_flow_field reflects scenario hazard blocks."""
+
+    def test_hazard_scenario_blocks_cells(self) -> None:
+        """The hazard scenario re-routes: its field blocks cells the base does not."""
+        params = ForceParams.defaults()
+        floor_plan, _ = _load_scenario("hazard_lecture_hall")
+        base = FlowField.build(floor_plan)
+        rerouted = rerouted_flow_field("hazard_lecture_hall", params)
+        assert len(rerouted.blocked) > len(base.blocked)
+
+    def test_event_free_scenario_matches_base(self) -> None:
+        """A scenario with no events yields a field with no extra blocks."""
+        floor_plan, _ = _load_scenario("lecture_hall")
+        base = FlowField.build(floor_plan)
+        rerouted = rerouted_flow_field("lecture_hall", ForceParams.defaults())
+        assert len(rerouted.blocked) == len(base.blocked)

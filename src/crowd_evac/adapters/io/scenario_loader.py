@@ -26,6 +26,7 @@ from crowd_evac.domain.floor_plan import (
 )
 from crowd_evac.scenarios.schema import (
     AgentConfigData,
+    EmergencyEventData,
     ExitData,
     FloorPlanData,
     ObstacleData,
@@ -35,6 +36,7 @@ from crowd_evac.scenarios.schema import (
 )
 
 _SUPPORTED_VERSION = "1.0"
+_SUPPORTED_EVENT_TYPES: tuple[str, ...] = ("place_panic_source",)
 
 
 def load_scenario_file(path: Path) -> tuple[FloorPlan, ScenarioData]:
@@ -152,6 +154,7 @@ def _coerce_scenario(raw: Any, source: str) -> ScenarioData:
     sim_raw = raw.get("simulation", {})
     # cast is safe: we've validated structure and sim_raw is a dict subset.
     sim_data: SimConfigData = cast(SimConfigData, sim_raw)
+    events_data = _normalize_events(raw.get("events", []), source)
 
     # Build the typed dict from normalised components.
     return ScenarioData(
@@ -160,7 +163,115 @@ def _coerce_scenario(raw: Any, source: str) -> ScenarioData:
         floor_plan=fp_data,
         agents=agents_data,
         simulation=sim_data,
+        events=events_data,
     )
+
+
+def _normalize_events(raw: Any, source: str) -> list[EmergencyEventData]:
+    """Validate the optional events list and return normalised event dicts.
+
+    Args:
+        raw: The scenario's ``events`` value (``[]`` when the key is absent).
+        source: Human-readable source label for error messages.
+
+    Returns:
+        A list of validated :class:`EmergencyEventData`; empty when no events.
+
+    Raises:
+        MalformedScenarioError: If ``raw`` is not a list or any entry is
+            structurally invalid (missing field, unknown type, bad position).
+    """
+    if not isinstance(raw, list):
+        raise MalformedScenarioError(
+            f"Scenario {source!r}: events must be a JSON array"
+        )
+    return [_normalize_event(item, i, source) for i, item in enumerate(raw)]
+
+
+def _normalize_event(
+    raw: Any, index: int, source: str
+) -> EmergencyEventData:
+    """Validate one emergency event and return a normalised event dict.
+
+    Structural validation only: ``tick`` non-negative int, known ``type``, and
+    ``pos`` a two-element coordinate.  Value-range checks on intensity/radius
+    are enforced when the event is applied via
+    :class:`~crowd_evac.domain.panic_source.PanicSource`.
+
+    Args:
+        raw: One entry from the scenario ``events`` array.
+        index: Position of this event in the array, for error messages.
+        source: Human-readable source label for error messages.
+
+    Returns:
+        A validated :class:`EmergencyEventData`.
+
+    Raises:
+        MalformedScenarioError: If the entry is not an object, is missing a
+            required field, has an unsupported ``type``, a negative ``tick``,
+            or a ``pos`` that is not a two-number list.
+    """
+    label = f"Scenario {source!r}: events[{index}]"
+    if not isinstance(raw, dict):
+        raise MalformedScenarioError(f"{label} must be a JSON object")
+    for field in ("tick", "type", "pos"):
+        if field not in raw:
+            raise MalformedScenarioError(
+                f"{label} missing required field: {field!r}"
+            )
+    etype = raw["type"]
+    if etype not in _SUPPORTED_EVENT_TYPES:
+        raise MalformedScenarioError(
+            f"{label}: unsupported type {etype!r}; "
+            f"expected one of {list(_SUPPORTED_EVENT_TYPES)}"
+        )
+    try:
+        tick = int(raw["tick"])
+    except (TypeError, ValueError) as exc:
+        raise MalformedScenarioError(f"{label}: tick must be an int") from exc
+    if tick < 0:
+        raise MalformedScenarioError(f"{label}: tick must be >= 0, got {tick}")
+    pos = raw["pos"]
+    if not isinstance(pos, (list, tuple)) or len(pos) != 2:
+        raise MalformedScenarioError(
+            f"{label}: pos must be a two-element [x, y] list"
+        )
+    return _build_event(raw, tick, float(pos[0]), float(pos[1]))
+
+
+def _build_event(
+    raw: dict[str, Any], tick: int, x: float, y: float
+) -> EmergencyEventData:
+    """Assemble a normalised event dict, carrying only the provided optionals.
+
+    Args:
+        raw: The validated raw event object.
+        tick: Validated non-negative firing tick.
+        x: Validated world x-position (m).
+        y: Validated world y-position (m).
+
+    Returns:
+        A :class:`EmergencyEventData` with optional keys copied through only
+        when present in ``raw``.
+    """
+    event: EmergencyEventData = {
+        "tick": tick,
+        "type": "place_panic_source",
+        "pos": [x, y],
+    }
+    if "intensity" in raw:
+        event["intensity"] = float(raw["intensity"])
+    if "radius" in raw:
+        event["radius"] = float(raw["radius"])
+    if "decay_rate" in raw:
+        event["decay_rate"] = float(raw["decay_rate"])
+    if "block_radius" in raw:
+        event["block_radius"] = float(raw["block_radius"])
+    if "blocks_navigation" in raw:
+        event["blocks_navigation"] = bool(raw["blocks_navigation"])
+    if "source_type" in raw:
+        event["source_type"] = str(raw["source_type"])
+    return event
 
 
 def _normalize_floor_plan(raw: Any, source: str) -> FloorPlanData:

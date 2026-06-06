@@ -70,6 +70,40 @@ class SimConfigData(TypedDict, total=False):
     max_ticks: int
 
 
+class EmergencyEventData(TypedDict):
+    """JSON schema for one scripted emergency event injected mid-run.
+
+    Mirrors a runtime panic-source injection
+    (:func:`crowd_evac.application.injection.add_panic_source`): at simulation
+    tick ``tick`` a panic source is placed at ``pos``, driving the panic
+    gradient and (when ``blocks_navigation``) re-routing the crowd around the
+    hazard.  All fields beyond ``tick``, ``type`` and ``pos`` are optional and
+    fall back to the :func:`~crowd_evac.application.injection.add_panic_source`
+    defaults when absent.
+
+    Fields:
+        tick: Simulation tick at which the event fires.  Must be >= 0.
+        type: Event kind.  Only ``"place_panic_source"`` is supported.
+        pos: World position ``[x, y]`` in metres (a two-element list).
+        intensity: Initial source intensity in ``[0, 1]``.
+        radius: Panic-gradient influence radius in metres.
+        decay_rate: Intensity reduction per simulated second.
+        block_radius: Navigation-block footprint radius in metres.
+        blocks_navigation: Whether the hazard blocks flow-field cells.
+        source_type: Hazard type tag (e.g. ``"fire"``).
+    """
+
+    tick: int
+    type: Literal["place_panic_source"]
+    pos: list[float]
+    intensity: NotRequired[float]
+    radius: NotRequired[float]
+    decay_rate: NotRequired[float]
+    block_radius: NotRequired[float]
+    blocks_navigation: NotRequired[bool]
+    source_type: NotRequired[str]
+
+
 class ScenarioData(TypedDict):
     """Root JSON schema for a crowd_evac scenario file.
 
@@ -80,8 +114,14 @@ class ScenarioData(TypedDict):
           "name": "lecture_hall",
           "floor_plan": { ... },
           "agents": {"count": 200, "spawn_seed": 42},
-          "simulation": {"dt": 0.05, "max_ticks": 10000}
+          "simulation": {"dt": 0.05, "max_ticks": 10000},
+          "events": [
+            {"tick": 200, "type": "place_panic_source", "pos": [25.0, 15.0]}
+          ]
         }
+
+    The ``events`` list is optional and additive (schema stays at "1.0"):
+    scenario files without it load exactly as before.
     """
 
     schema_version: str
@@ -89,3 +129,4 @@ class ScenarioData(TypedDict):
     floor_plan: FloorPlanData
     agents: AgentConfigData
     simulation: SimConfigData
+    events: NotRequired[list[EmergencyEventData]]
