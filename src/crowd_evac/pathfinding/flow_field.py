@@ -73,6 +73,7 @@ class FlowField:
         cell_size: float,
         walkable: npt.NDArray[np.bool_],
         exit_cells: Iterable[Cell],
+        cost_penalty: npt.NDArray[np.float64] | None = None,
     ) -> None:
         """Solve the integration and flow fields for a walkable grid.
 
@@ -81,6 +82,12 @@ class FlowField:
             walkable: Boolean grid; ``True`` where a cell is passable.
             exit_cells: Goal cells (sources of the Dijkstra solve). Cells
                 outside the grid or on a blocked cell are ignored.
+            cost_penalty: Optional per-cell traversal-cost multiplier (a
+                "danger field"), shape ``(rows, cols)``, all ``>= 0``. Entering
+                a cell costs ``base_step * (1 + cost_penalty[cell])``, so high
+                values steer the solve *around* hazardous cells while leaving
+                them walkable (no zero-direction trap). ``None`` means no
+                penalty (uniform metric cost).
 
         Raises:
             ValueError: If cell_size is not positive.
@@ -91,9 +98,27 @@ class FlowField:
         self.cell_size: float = cell_size
         self._walkable: npt.NDArray[np.bool_] = walkable
         self._exit_cells: tuple[Cell, ...] = tuple(exit_cells)
+        # Pristine floor mask/exits this field derives from.  ``build`` and
+        # ``_rebuild`` overwrite these so re-solves always start from the
+        # unblocked floor, letting cleared hazards restore their cells rather
+        # than accumulating blocks forever.
+        self._base_walkable: npt.NDArray[np.bool_] = walkable
+        self._base_exit_cells: tuple[Cell, ...] = self._exit_cells
+        self._blocked: frozenset[Cell] = frozenset()
+        self._cost_penalty: npt.NDArray[np.float64] | None = cost_penalty
         self.cost, self.direction = _solve(
-            walkable, self._exit_cells, cell_size
+            walkable, self._exit_cells, cell_size, cost_penalty
         )
+
+    @property
+    def blocked(self) -> frozenset[Cell]:
+        """Set of hazard-blocked cells currently overlaid on the floor mask.
+
+        Empty for a freshly built field; populated by :meth:`with_blocks` /
+        :meth:`recompute`.  Compared by callers to decide whether a re-solve
+        is needed when the active-hazard set changes.
+        """
+        return self._blocked
 
     @classmethod
     def build(
@@ -120,11 +145,36 @@ class FlowField:
     def recompute(self, blocked_cells: Iterable[Cell]) -> FlowField:
         """Return a re-solved field with extra cells blocked (re-routing).
 
-        Reuses this field's cached walkable mask and exit list — the floor
-        geometry is not re-rasterised — overlays ``blocked_cells`` as
-        impassable, drops any exit that falls on a newly blocked cell, and
-        re-solves. Cells that already routed to an unaffected exit keep their
-        direction; only the region downstream of the block changes (R4.4).
+        Adds ``blocked_cells`` to this field's existing :attr:`blocked` set and
+        re-solves from the *pristine* floor mask, so the new field carries the
+        union of all blocks. Cells that already routed to an unaffected exit
+        keep their direction; only the region downstream of the block changes
+        (R4.4). To replace the block set entirely (restoring cleared cells),
+        use :meth:`with_blocks`.
+
+        Args:
+            blocked_cells: ``(row, col)`` cells to additionally mark
+                impassable. Out-of-bounds cells are ignored.
+
+        Returns:
+            A new :class:`FlowField`; this instance is left unchanged.
+
+        Raises:
+            PathfindingError: If blocking removes every walkable exit cell.
+        """
+        return self._rebuild(
+            self._blocked | frozenset(blocked_cells), self._cost_penalty
+        )
+
+    def with_blocks(self, blocked_cells: Iterable[Cell]) -> FlowField:
+        """Return a field with *exactly* ``blocked_cells`` blocked (absolute).
+
+        Unlike :meth:`recompute` (which accumulates), this replaces the block
+        set: it re-solves from the pristine floor mask with only the supplied
+        cells impassable, so any previously-blocked cell not in
+        ``blocked_cells`` is **restored**. This is what lets a decayed or
+        removed hazard free its footprint and let agents recalculate a route.
+        The cost penalty is cleared (use :meth:`with_hazards` to set one).
 
         Args:
             blocked_cells: ``(row, col)`` cells to mark impassable. Out-of-
@@ -136,13 +186,72 @@ class FlowField:
         Raises:
             PathfindingError: If blocking removes every walkable exit cell.
         """
-        rows, cols = self._walkable.shape
-        new_walkable = self._walkable.copy()
-        for r, c in blocked_cells:
+        return self._rebuild(frozenset(blocked_cells), None)
+
+    def with_hazards(
+        self,
+        blocked_cells: Iterable[Cell],
+        cost_penalty: npt.NDArray[np.float64] | None,
+    ) -> FlowField:
+        """Return a field re-solved with both a hard block set and a soft cost.
+
+        Replaces *both* the impassable block set (the hazard's physical core)
+        and the graded traversal-cost penalty (the danger field over the
+        hazard's wider influence radius), re-solving from the pristine floor
+        mask. The combination routes agents *around* danger toward the next-best
+        exit while keeping every cell walkable, so no agent loses its descent
+        direction. Cleared hazards are restored when called with an empty block
+        set and ``None`` penalty.
+
+        Args:
+            blocked_cells: ``(row, col)`` cells to mark impassable. Out-of-
+                bounds cells are ignored.
+            cost_penalty: Per-cell traversal-cost multiplier, shape
+                ``(rows, cols)`` and ``>= 0``, or ``None`` for no penalty.
+
+        Returns:
+            A new :class:`FlowField`; this instance is left unchanged.
+
+        Raises:
+            PathfindingError: If blocking removes every walkable exit cell.
+        """
+        return self._rebuild(frozenset(blocked_cells), cost_penalty)
+
+    def _rebuild(
+        self,
+        blocked: frozenset[Cell],
+        cost_penalty: npt.NDArray[np.float64] | None,
+    ) -> FlowField:
+        """Re-solve from the pristine floor mask with ``blocked`` + penalty.
+
+        Args:
+            blocked: Absolute set of cells to mark impassable; in-bounds cells
+                only are applied (out-of-bounds silently ignored).
+            cost_penalty: Per-cell traversal-cost multiplier to apply in the
+                solve, or ``None``.
+
+        Returns:
+            A new :class:`FlowField` carrying the same pristine base, the given
+            ``blocked`` set, and the given penalty.
+
+        Raises:
+            PathfindingError: If blocking removes every walkable exit cell.
+        """
+        rows, cols = self._base_walkable.shape
+        new_walkable = self._base_walkable.copy()
+        in_bounds: set[Cell] = set()
+        for r, c in blocked:
             if 0 <= r < rows and 0 <= c < cols:
                 new_walkable[r, c] = False
-        remaining = [e for e in self._exit_cells if new_walkable[e[0], e[1]]]
-        return FlowField(self.cell_size, new_walkable, remaining)
+                in_bounds.add((r, c))
+        remaining = [
+            e for e in self._base_exit_cells if new_walkable[e[0], e[1]]
+        ]
+        field = FlowField(self.cell_size, new_walkable, remaining, cost_penalty)
+        field._base_walkable = self._base_walkable
+        field._base_exit_cells = self._base_exit_cells
+        field._blocked = frozenset(in_bounds)
+        return field
 
     def sample(
         self, positions: npt.NDArray[np.float64]
@@ -188,6 +297,92 @@ class FlowField:
         return _normalise_rows(out)
 
 
+def cells_in_radius(
+    pos: tuple[float, float],
+    radius: float,
+    cell_size: float,
+    grid_shape: tuple[int, ...],
+) -> list[Cell]:
+    """Return ``(row, col)`` cells whose centres lie within *radius* of *pos*.
+
+    Uses the flow-field coordinate convention: column index maps to world x,
+    row index maps to world y.  Cell ``(r, c)`` has its centre at world
+    position ``((c + 0.5) * cell_size, (r + 0.5) * cell_size)``.  Only cells
+    strictly inside the grid are returned; out-of-bounds cells are skipped.
+
+    Args:
+        pos: World position ``(x, y)`` in metres.
+        radius: Search radius in metres.  Non-negative.
+        cell_size: Grid cell side length in metres.  Must be positive.
+        grid_shape: ``(rows, cols, ...)`` of the grid; only the first two
+            dimensions are used.
+
+    Returns:
+        List of in-bounds ``(row, col)`` integer tuples whose cell centres
+        fall within *radius* of *pos*.  Empty when none qualify.
+    """
+    x, y = pos
+    rows = int(grid_shape[0])
+    cols = int(grid_shape[1])
+    c0 = int(x / cell_size)
+    r0 = int(y / cell_size)
+    r_cells = int(math.ceil(radius / cell_size)) + 1
+
+    result: list[Cell] = []
+    for dr in range(-r_cells, r_cells + 1):
+        for dc in range(-r_cells, r_cells + 1):
+            r = r0 + dr
+            c = c0 + dc
+            if not (0 <= r < rows and 0 <= c < cols):
+                continue
+            cx = (c + 0.5) * cell_size
+            cy = (r + 0.5) * cell_size
+            if math.hypot(cx - x, cy - y) <= radius:
+                result.append((r, c))
+    return result
+
+
+def build_danger_field(
+    grid_shape: tuple[int, ...],
+    cell_size: float,
+    hazards: Iterable[tuple[float, float, float]],
+) -> npt.NDArray[np.float64]:
+    """Build a per-cell danger field in ``[0, 1]`` from radial hazards.
+
+    Each hazard ``(x, y, radius)`` contributes a linearly-decaying bump that is
+    ``1`` at its centre and ``0`` at (and beyond) its radius; the field is the
+    element-wise maximum across hazards (a cell is as dangerous as its worst
+    nearby hazard).  The result is intended to be scaled by an avoidance weight
+    and passed as ``cost_penalty`` to the flow-field solve, so the danger
+    *shape* (steeper toward each core) shapes the route while the weight sets
+    its strength.
+
+    Args:
+        grid_shape: ``(rows, cols, ...)`` of the grid; only the first two
+            dimensions are used.
+        cell_size: Grid cell side length in metres. Must be positive.
+        hazards: Iterable of ``(x, y, radius)`` world-space hazards. Hazards
+            with non-positive radius are skipped.
+
+    Returns:
+        Float64 array of shape ``(rows, cols)`` with values in ``[0, 1]``;
+        all-zero when no hazard has a positive radius.
+    """
+    rows = int(grid_shape[0])
+    cols = int(grid_shape[1])
+    danger: npt.NDArray[np.float64] = np.zeros((rows, cols), dtype=np.float64)
+    cx = (np.arange(cols, dtype=np.float64) + 0.5) * cell_size
+    cy = (np.arange(rows, dtype=np.float64) + 0.5) * cell_size
+    xx, yy = np.meshgrid(cx, cy)
+    for hx, hy, hr in hazards:
+        if hr <= 0.0:
+            continue
+        dist = np.hypot(xx - hx, yy - hy)
+        contrib = np.clip(1.0 - dist / hr, 0.0, 1.0)
+        danger = np.maximum(danger, contrib)
+    return danger
+
+
 # ---------------------------------------------------------------------------
 # Solver
 # ---------------------------------------------------------------------------
@@ -197,8 +392,16 @@ def _solve(
     walkable: npt.NDArray[np.bool_],
     exit_cells: tuple[Cell, ...],
     cell_size: float,
+    cost_penalty: npt.NDArray[np.float64] | None = None,
 ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
     """Compute the integration (cost) and flow (direction) fields.
+
+    Args:
+        walkable: Boolean passability grid.
+        exit_cells: Goal cells (Dijkstra sources).
+        cell_size: Cell side length in metres.
+        cost_penalty: Optional per-cell traversal-cost multiplier; see
+            :meth:`FlowField.__init__`.
 
     Raises:
         PathfindingError: If no exit cell is in-bounds and walkable.
@@ -214,7 +417,7 @@ def _solve(
         raise PathfindingError(
             "flow field has no walkable exit cell to route toward"
         )
-    _dijkstra(walkable, cost, sources, cell_size)
+    _dijkstra(walkable, cost, sources, cell_size, cost_penalty)
     direction = _build_directions(walkable, cost)
     return cost, direction
 
@@ -224,11 +427,15 @@ def _dijkstra(
     cost: npt.NDArray[np.float64],
     sources: list[Cell],
     cell_size: float,
+    cost_penalty: npt.NDArray[np.float64] | None = None,
 ) -> None:
-    """Fill ``cost`` in place with metric distance to the nearest source.
+    """Fill ``cost`` in place with least-cost distance to the nearest source.
 
     Multi-source 8-connected Dijkstra. Diagonal moves are skipped when either
-    shared orthogonal neighbour is blocked (no corner cutting).
+    shared orthogonal neighbour is blocked (no corner cutting). When
+    ``cost_penalty`` is supplied, entering cell ``n`` costs
+    ``base_step * (1 + cost_penalty[n])``, so the solved field routes around
+    high-penalty (hazardous) cells while keeping them traversable.
     """
     rows, cols = walkable.shape
     heap: list[tuple[float, int, int]] = []
@@ -246,6 +453,8 @@ def _dijkstra(
             if dr != 0 and dc != 0 and not (walkable[r, nc] and walkable[nr, c]):
                 continue
             step = math.hypot(dr, dc) * cell_size
+            if cost_penalty is not None:
+                step *= 1.0 + float(cost_penalty[nr, nc])
             if dist + step < cost[nr, nc]:
                 cost[nr, nc] = dist + step
                 heapq.heappush(heap, (dist + step, nr, nc))

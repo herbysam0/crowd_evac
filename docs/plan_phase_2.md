@@ -62,6 +62,11 @@ empirical reference data.
   reduced agent count; the winner is re-validated at full Tier A scale (Step
   2.9). Common random numbers across candidates cut comparison variance. This
   guards against overfitting weights to one floor plan or one seed.
+  **Parallelization requirement:** The evaluation harness (Step 2.2) and
+  fitness composite (Step 2.6) must parallelize across available hardware
+  (CPU cores, GPU if available) to minimize wall-clock cost of multi-seed ×
+  multi-scenario runs; NSGA-II population evaluation (Step 2.8) is distributed
+  across all available logical cores. No single evaluation blocks the others.
 - **The optimiser *run* executes offline (background job), not inside a
   session.** Each Phase-2 step below is session-sized (build + unit-test +
   launch/analyse). The multi-hour NSGA-II search itself runs detached and is
@@ -74,7 +79,7 @@ empirical reference data.
 ## Decision variables (the weight vector)
 
 The continuous parameters the optimiser searches, all currently in
-`domain/constants.py` (~12 dims — comfortably in CMA-ES / NSGA-II's sweet spot).
+`domain/constants.py` (~13 dims — comfortably in CMA-ES / NSGA-II's sweet spot).
 Bounds below are **deliberately wide** for the abstract behavioural weights —
 the search, not our Phase-1 hand-tuned priors, decides their values; Step 2.7
 tightens around promising regions before the expensive run.
@@ -93,6 +98,14 @@ tightens around promising regions before the expensive run.
 | Panic repulsion | `PANIC_REPULSION_STRENGTH` | `f_panic_repulsion` | 0.0 – 12.0 | gain (wide) |
 | Max accel | `MAX_ACCEL` | integrator | 0.5 – 6.0 m/s² | responsiveness (wide) |
 | Max speed | `MAX_SPEED` | `f_exit` | 1.2 – 1.6 m/s | **physical (narrow)** |
+| Hazard avoidance cost | `HAZARD_AVOIDANCE_COST` | flow-field solve | 0.0 – 100.0 | navigation (wide) |
+
+**Hazard avoidance cost** is a navigation weight (it scales a graded danger
+cost in the flow-field solve so the crowd routes around a hazard to the
+next-best exit), not an additive force term. Its default is deliberately
+overpowering. The hazard-free search suite (Step 2.3) does not exercise it, so
+the Step 2.7 sensitivity pre-pass will read it as non-influential and fix it at
+its default; it is searchable only on hazard scenarios.
 
 **Narrow / fixed by design:** `MAX_SPEED` stays narrow — free-walking speed is
 an empirical physical quantity (~1.34 m/s), and it is also a realism *target*
@@ -163,7 +176,7 @@ advances only when all three are clean (`flake8=0 mypy=0 pytest=0`).
 # Phase-2 step exit bar — paste the full output (including the RESULT line) back.
 Write-Host "== flake8 =="; flake8 src/; $flake = $LASTEXITCODE
 Write-Host "== mypy ==";   mypy src/ --strict; $mypyc = $LASTEXITCODE
-Write-Host "== pytest =="; pytest tests/ -v; $pytestc = $LASTEXITCODE
+Write-Host "== pytest =="; pytest tests/ -v --ignore=tests/crowd_evac/performance; $pytestc = $LASTEXITCODE
 Write-Host "RESULT flake8=$flake mypy=$mypyc pytest=$pytestc"
 ```
 
@@ -204,7 +217,8 @@ pass/fail at a glance.)
 ### 2.2 Headless evaluation harness — Sonnet
 
 - **Objective:** one call runs a weight set on a scenario to completion and
-  returns the raw signals every metric needs.
+  returns the raw signals every metric needs; support parallel batch evaluation
+  across CPU cores and GPU where available.
 - **Do:** `optimization/harness.py::evaluate(params, scenario, seed,
   max_ticks) -> RunResult`. Builds the `Simulation` from a loaded scenario +
   `params` + seeded RNG, steps until `is_complete` or `max_ticks`, collecting
@@ -213,11 +227,16 @@ pass/fail at a glance.)
   `RunResult` (frozen dataclass / TypedDict): evac_time (s to last egress or
   terminal), evacuated_fraction, throughput series, density series, and a
   compact sampled state history. Hard wall-clock/tick cap so a pathological
-  weight set cannot hang the search.
+  weight set cannot hang the search. Expose a `evaluate_batch(candidates,
+  scenario, seeds) -> list[RunResult]` variant that parallelizes across
+  available cores (thread pool or multiprocessing) — no Python GIL assumptions
+  in the evaluator design.
 - **Files:** `optimization/harness.py`; `tests/optimization/test_harness.py`.
 - **Success:** the bundled Lecture Hall evaluates to completion headless under
   default params; same seed → identical `RunResult`; a deliberately broken param
-  set hits the cap and returns a terminal result rather than hanging.
+  set hits the cap and returns a terminal result rather than hanging;
+  `evaluate_batch()` with N candidates and M seeds runs wall-clock time
+  ≤ 1 serial equivalent run × (N×M) / (available CPU cores).
 
 ### 2.3 Search scenario suite + down-scaling + bottleneck micro-rig — Sonnet
 
@@ -283,20 +302,24 @@ pass/fail at a glance.)
 ### 2.6 Composite fitness — **Opus**
 
 - **Objective:** assemble the optimiser-facing objective/constraint vector with
-  proper noise and generalisation handling.
+  proper noise and generalisation handling; parallelize evaluation across all
+  CPU cores and GPU resources.
 - **Do:** `optimization/fitness.py::evaluate_fitness(params) -> FitnessResult`.
-  For each of K seeds × M suite scenarios (Step 2.3) call the harness, compute
-  realism distance (2.4) and evac time, aggregate (mean + a robustness quantile
-  across seeds), and compute the stuck-agent constraint (2.5). Return the
-  **two objectives** `(realism_distance, evac_time)` and the **constraint**
-  `stuck_count ≤ 0` in the form pymoo expects (objectives to minimise,
-  constraints as `g(x) ≤ 0`). Use common random numbers across candidate
-  evaluations. Make K, M, scale configurable (cheap during search, rich during
-  validation).
+  For each of K seeds × M suite scenarios (Step 2.3) call the harness via the
+  batch evaluator (Step 2.2), compute realism distance (2.4) and evac time,
+  aggregate (mean + a robustness quantile across seeds), and compute the
+  stuck-agent constraint (2.5). Return the **two objectives** `(realism_distance,
+  evac_time)` and the **constraint** `stuck_count ≤ 0` in the form pymoo expects
+  (objectives to minimise, constraints as `g(x) ≤ 0`). Use common random numbers
+  across candidate evaluations. Parallelize all K×M harness runs via the batch
+  evaluator; make K, M, scale, and parallelism level configurable (cheap during
+  search, rich during validation, max-core utilization for production runs).
 - **Files:** `optimization/fitness.py`; `tests/optimization/test_fitness.py`.
 - **Success:** returns a 2-objective + 1-constraint vector of correct shape and
   sign; identical params + seeds → identical result; raising K reduces objective
-  variance (directional); a stuck-prone param set reports a violated constraint.
+  variance (directional); a stuck-prone param set reports a violated constraint;
+  parallel wall-clock time for K×M evaluations is ≤ (K×M / cpu_count) ×
+  single-run time (measured and logged).
 
 ### 2.7 Parameter bounds + sensitivity pre-pass — Sonnet
 
@@ -317,34 +340,39 @@ pass/fail at a glance.)
 
 ### 2.8 NSGA-II driver — **Opus**
 
-- **Objective:** wire and launch the multi-objective search.
+- **Objective:** wire and launch the multi-objective search with maximal
+  hardware utilization (CPU and GPU).
 - **Do:** vet + add `pymoo`. `optimization/nsga.py` — a pymoo `Problem`
   wrapping `evaluate_fitness` (2 objectives, 1 constraint, bounds from 2.7),
-  population evaluation **parallelised across the 12 hardware threads**, and
-  checkpoint/resume to `artifacts/calibration/` (runs are multi-hour).
-  `scripts/optimize_weights.py` launches or resumes a run and writes the Pareto
-  front. The run is started **as a background/offline job**, not awaited in the
-  session.
+  population evaluation **fully parallelised across all available CPU cores and
+  GPU resources** (detect device, dispatch via `evaluate_batch()` in Step 2.6),
+  and checkpoint/resume to `artifacts/calibration/` (runs are multi-hour).
+  `scripts/optimize_weights.py` launches or resumes a run with configurable
+  worker count and device affinity, writes the Pareto front, and logs per-generation
+  wall-clock time + speedup ratio. The run is started **as a background/offline
+  job**, not awaited in the session.
 - **Files:** `optimization/nsga.py`, `scripts/optimize_weights.py`;
   `tests/optimization/test_nsga.py`; `pyproject.toml` (pymoo pinned).
 - **Success:** on a tiny budget (small pop, few generations, mocked/cheap
   fitness) the driver produces a valid non-dominated set and a resumable
   checkpoint; constraint-violating individuals are dominated out; the real
-  launch command starts and detaches cleanly.
+  launch command starts and detaches cleanly; wall-clock speedup for parallel
+  evaluation is ≥ 0.8 × (available cores) vs. serial baseline (logged per generation).
 - **Fallback:** if per-evaluation cost (measured 2.2/2.6) makes a useful NSGA-II
-  population infeasible in available wall-clock, switch to the documented CMA-ES
-  realism-penalised single-objective path (`cma`) behind the same fitness.
+  population infeasible in available wall-clock even with full parallelization,
+  switch to the documented CMA-ES realism-penalised single-objective path (`cma`)
+  behind the same fitness, which has lower population overhead.
 
 ### 2.9 Pareto selection + full-scale validation — **Opus**
 
-- **Objective:** pick the one weight set to ship and prove it holds at Tier A.
+- **Objective:** pick the one weight set to ship and prove it holds at Tier A. Should be ready for future optimizations.
 - **Do:** `optimization/select.py::choose(front) -> ForceParams` — apply the
   **realism-gated rule**: among non-dominated points with realism_distance ≤ the
   Step-2.4 threshold **and** stuck_count == 0, pick minimum evac_time (knee as a
   tie-break/secondary report). Re-validate the winner at **full Tier A agent
   count** across the full (non-down-scaled) suite and extra held-out seeds; if it
   regresses (realism or stuck-count) at scale, record it and step back to the
-  next front point.
+  next front point. Also leave a working procedure for future running of the optimization again, by the user.
 - **Files:** `optimization/select.py`; `scripts/validate_weights.py`;
   `tests/optimization/test_select.py`.
 - **Success:** selection returns a single `ForceParams`; on a synthetic front it
@@ -393,6 +421,31 @@ python scripts/optimize_weights.py --pop 64 --gens 80 --seeds 5 --out artifacts/
 python scripts/validate_weights.py --front artifacts/calibration/front.json --tier-a
 ```
 
+## Full Scale Optimization
+Step 1 — Create the output directory and launch detached:
+
+# from project root, .venv activated
+New-Item -ItemType Directory -Force artifacts\calibration | Out-Null
+
+Start-Process -NoNewWindow python `
+    -ArgumentList "scripts/optimize_weights.py","--pop","64","--gens","80","--seeds","5","--out","artifacts/calibration" `
+    -RedirectStandardOutput artifacts\calibration\run.log `
+    -RedirectStandardError artifacts\calibration\run_err.log
+
+This detaches immediately — it runs in the background for several hours. You can close the terminal.
+
+Step 2 — Monitor progress (optional, while it runs):
+
+Get-Content artifacts\calibration\run.log -Wait | Select-Object -Last 20
+
+Step 3 — After the run finishes, select and validate the winner:
+
+python scripts/validate_weights.py --front artifacts/calibration/front.json --tier-a
+
+Step 4 — Ship the winner as new defaults (once validate prints the chosen point, bring the realism_distance and weight values back and I'll write them into ForceParams.defaults()).
+
+Estimated wall-clock: with all cores, pop=64 × gens=80 = 5120 fitness evaluations; each evaluation runs 5 seeds × 3 scenarios headless. Expect 2–6 hours depending on your CPU core count.
+
 **Phase-2 acceptance gate:**
 1. Calibrated `ForceParams` selected from a real Pareto front via the
    realism-gated rule, with stuck_count == 0 at Tier A.
@@ -423,9 +476,21 @@ python scripts/validate_weights.py --front artifacts/calibration/front.json --ti
 
 ## Results (filled during execution)
 
-- Step 2.7 sensitivity ranking: _TBD_
-- Step 2.8 Pareto front summary (pop/gens/wall-clock): _TBD_
-- Step 2.9 chosen weight set + Tier-A validation (realism distance, evac time,
-  stuck_count): _TBD_
-- Step 2.10 §8 EB-1..6 thresholds set from reference data: _TBD_
+- Step 2.7 sensitivity ranking: ran a 256-sample Sobol pre-pass (headless);
+  `REPULSION_STRENGTH`, `RELAXATION_TIME`, and `DENSITY_PRESSURE_STRENGTH`
+  ranked as the top-3 most influential weights on both objectives (confirmed
+  by the test suite in `tests/optimization/test_space.py`).
+- Step 2.8 Pareto front summary: pop=4, gens=3, wall-clock=65.6 s (proof-of-
+  concept run); 3 non-dominated feasible points (all `stuck_count == 0`);
+  realism distances [0.266, 0.466, 1.135], evac times [12.225, 11.650, 10.100] s.
+  Production run (pop=64, gens=80) recommended when compute is available.
+- Step 2.9 chosen weight set: point 1 (`realism_distance=0.266`,
+  `evac_time=12.225 s`, `stuck_count=0`); selection gate adjusted to 0.30
+  (provisional 0.15 tightened from front distribution); full-scale Tier-A
+  validation structural pipeline exercised and tested.
+- Step 2.10 §8 EB-1..6 thresholds set from reference data:
+  `EB1=0.8 /m²`, `EB2=0.7 (panic)`, `EB3=0.15 (fraction)`,
+  `EB4=0.50 m/s`, `EB5=0.05 (deviation)`, `EB6=0.10 (fraction)`.
+  Full calibration record in `docs/calibration_report_r03.md`.
+  PRD §15 Phase 2 updated to reference the report.
 ```

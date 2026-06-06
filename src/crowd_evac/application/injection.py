@@ -7,18 +7,21 @@ positions during a live run.  Each call:
 1. Appends a :class:`~crowd_evac.domain.panic_source.PanicSource` to
    ``sim.panic_field``, making the panic gradient active from the *next*
    tick's decay and propagation phase (R12.1).
-2. Optionally re-solves the navigation flow field with the source cells
-   blocked, giving the crowd a globally-optimal route around the hazard
-   (R4.3 / R12.2).  A :exc:`~crowd_evac.domain.errors.PathfindingError`
-   — raised when blocking would disconnect all exits — is caught and
-   logged as a warning rather than propagated; the panic field is always
-   updated regardless.
+2. Optionally blocks the hazard's *physical* footprint (``block_radius``,
+   not the larger panic ``radius``) in the navigation flow field and re-solves
+   so the crowd routes around the hazard (R4.3 / R12.2).  The re-solve runs
+   through :meth:`~crowd_evac.application.simulation.Simulation.refresh_hazard_blocks`,
+   which rebuilds from the pristine floor mask for the full set of active
+   hazards — so a block is never permanent: it is restored as soon as the
+   source decays or is removed.  A
+   :exc:`~crowd_evac.domain.errors.PathfindingError` — raised when blocking
+   would disconnect all exits — is caught and logged rather than propagated;
+   the panic field is always updated regardless.
 3. Appends a tick-stamped ``"panic_source_added"`` event to the simulation
    event log (R6.3 / NFR-R3).
 
-:func:`remove_panic_source` withdraws a source and records the removal.
-It does **not** re-solve the flow field; see the function's docstring for
-the Phase 1 limitation.
+:func:`remove_panic_source` withdraws a source, re-solves the flow field so
+the source's footprint is restored, and records the removal.
 
 All mutations are routed through the
 :class:`~crowd_evac.application.simulation.Simulation` instance so the
@@ -27,11 +30,13 @@ All mutations are routed through the
 from __future__ import annotations
 
 import logging
-import math
 
 from crowd_evac.application.simulation import Simulation
-from crowd_evac.domain.constants import PANIC_DECAY_RATE, PANIC_RANGE
-from crowd_evac.domain.errors import PathfindingError
+from crowd_evac.domain.constants import (
+    HAZARD_BLOCK_RADIUS,
+    PANIC_DECAY_RATE,
+    PANIC_RANGE,
+)
 from crowd_evac.domain.panic_source import PanicSource
 from crowd_evac.ports.input_source import (
     InputEvent,
@@ -49,6 +54,7 @@ def add_panic_source(
     intensity: float = 1.0,
     radius: float = PANIC_RANGE,
     *,
+    block_radius: float = HAZARD_BLOCK_RADIUS,
     decay_rate: float = PANIC_DECAY_RATE,
     block_cells: bool = True,
 ) -> PanicSource:
@@ -72,13 +78,20 @@ def add_panic_source(
         pos: World position ``(x, y)`` in metres.
         intensity: Initial source intensity in ``[0, 1]``.  Defaults to
             ``1.0`` (fully active).
-        radius: Source influence radius in metres.  Defaults to
+        radius: Panic-gradient influence radius in metres.  Defaults to
             :data:`~crowd_evac.domain.constants.PANIC_RANGE`.
+        block_radius: Navigation-block footprint radius in metres, decoupled
+            from the (larger) panic *radius*.  Defaults to
+            :data:`~crowd_evac.domain.constants.HAZARD_BLOCK_RADIUS`; blocking
+            the full panic radius would engulf and strand the surrounding
+            crowd.
         decay_rate: Intensity reduction per simulated second.  Defaults to
             :data:`~crowd_evac.domain.constants.PANIC_DECAY_RATE`.
         block_cells: When ``True`` (default), grid cells whose centres fall
-            within *radius* of *pos* are blocked in the navigation flow
+            within *block_radius* of *pos* are blocked in the navigation flow
             field and a bounded re-route solve is triggered (R4.3 / R12.2).
+            The block is restored automatically when the source decays or is
+            removed (:meth:`~crowd_evac.application.simulation.Simulation.refresh_hazard_blocks`).
             A :exc:`~crowd_evac.domain.errors.PathfindingError` is caught
             silently if blocking would disconnect every exit.  Set to
             ``False`` to update the panic gradient only.
@@ -101,36 +114,14 @@ def add_panic_source(
         radius=radius,
         decay_rate=decay_rate,
         source_type=source_type,
+        block_radius=block_radius,
+        blocks_navigation=block_cells,
     )
     sim.panic_field.add_source(source)
 
-    blocked_count = 0
-    if block_cells:
-        blocked = _cells_in_radius(
-            (x, y),
-            radius,
-            sim.flow_field.cell_size,
-            sim.flow_field.cost.shape,
-        )
-        if blocked:
-            try:
-                sim.flow_field = sim.flow_field.recompute(blocked)
-                blocked_count = len(blocked)
-                logger.debug(
-                    "Flow field re-solved: %d cells blocked at (%.2f, %.2f).",
-                    blocked_count,
-                    x,
-                    y,
-                )
-            except PathfindingError:
-                logger.warning(
-                    "Injection at (%.2f, %.2f) radius=%.2f: blocking %d cells "
-                    "would disconnect all exits; flow field unchanged.",
-                    x,
-                    y,
-                    radius,
-                    len(blocked),
-                )
+    # Re-solve the flow field for the full active-hazard set (this source plus
+    # any pre-existing ones).  A no-op when block_cells is False.
+    blocked_count = sim.refresh_hazard_blocks() if block_cells else 0
 
     sim.log_event(
         "panic_source_added",
@@ -160,12 +151,10 @@ def remove_panic_source(sim: Simulation, source: PanicSource) -> None:
     Withdraws *source* from ``sim.panic_field`` and records the removal in
     the event log.
 
-    Note:
-        The navigation flow field is **not** re-solved on removal.
-        :meth:`~crowd_evac.pathfinding.flow_field.FlowField.recompute` only
-        adds blocked cells onto the cached walkable mask; restoring those
-        cells requires the original floor-plan mask, which the injection API
-        does not hold.  Full re-solve-on-remove is a Phase 3 concern.
+    The navigation flow field is re-solved from the pristine floor mask so
+    the removed source's footprint is restored (its cells become walkable
+    again), unless another active hazard still blocks them
+    (:meth:`~crowd_evac.application.simulation.Simulation.refresh_hazard_blocks`).
 
     Args:
         sim: Running simulation.
@@ -179,6 +168,7 @@ def remove_panic_source(sim: Simulation, source: PanicSource) -> None:
     """
     x, y = source.x, source.y
     sim.panic_field.remove_source(source)
+    sim.refresh_hazard_blocks()
     sim.log_event(
         "panic_source_removed",
         pos=[x, y],
@@ -190,54 +180,6 @@ def remove_panic_source(sim: Simulation, source: PanicSource) -> None:
         y,
         sim.tick,
     )
-
-
-def _cells_in_radius(
-    pos: tuple[float, float],
-    radius: float,
-    cell_size: float,
-    grid_shape: tuple[int, ...],
-) -> list[tuple[int, int]]:
-    """Return ``(row, col)`` grid cells whose centres lie within *radius* of *pos*.
-
-    Uses the flow-field coordinate convention: column index maps to world x,
-    row index maps to world y.  Cell ``(r, c)`` has its centre at world
-    position ``((c + 0.5) * cell_size, (r + 0.5) * cell_size)``.
-
-    Only cells strictly inside the grid are returned; out-of-bounds cells
-    are silently skipped.
-
-    Args:
-        pos: World position ``(x, y)`` in metres.
-        radius: Search radius in metres.  Non-negative.
-        cell_size: Grid cell side length in metres.  Must be positive.
-        grid_shape: ``(rows, cols, ...)`` of the grid; only the first two
-            dimensions are used.
-
-    Returns:
-        List of ``(row, col)`` integer tuples whose cell centres fall within
-        *radius* of *pos*.  Empty when no cell centre is within range.
-    """
-    x, y = pos
-    rows = int(grid_shape[0])
-    cols = int(grid_shape[1])
-    c0 = int(x / cell_size)
-    r0 = int(y / cell_size)
-    r_cells = int(math.ceil(radius / cell_size)) + 1
-
-    result: list[tuple[int, int]] = []
-    for dr in range(-r_cells, r_cells + 1):
-        for dc in range(-r_cells, r_cells + 1):
-            r = r0 + dr
-            c = c0 + dc
-            if not (0 <= r < rows and 0 <= c < cols):
-                continue
-            # Distance from pos to this cell's centre.
-            cx = (c + 0.5) * cell_size
-            cy = (r + 0.5) * cell_size
-            if math.hypot(cx - x, cy - y) <= radius:
-                result.append((r, c))
-    return result
 
 
 def process_input_events(

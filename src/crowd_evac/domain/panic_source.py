@@ -19,7 +19,11 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from crowd_evac.domain.constants import PANIC_DECAY_RATE, PANIC_RANGE
+from crowd_evac.domain.constants import (
+    HAZARD_BLOCK_RADIUS,
+    PANIC_DECAY_RATE,
+    PANIC_RANGE,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +56,13 @@ class PanicSource:
         decay_rate: Intensity reduction per simulated second.  Must be >= 0.
         source_type: Hazard type tag (e.g. ``"fire"``).  Selects the
             symbol rendered at the source position.  Unused by domain logic.
+        block_radius: Radius (m) of the navigation block this hazard punches
+            in the flow field, decoupled from the (larger) panic ``radius``.
+            Must be positive.  See
+            :data:`~crowd_evac.domain.constants.HAZARD_BLOCK_RADIUS`.
+        blocks_navigation: When ``True`` the hazard's footprint is blocked in
+            the flow field (agents re-route around it); when ``False`` the
+            hazard contributes panic pressure only and leaves routing intact.
     """
 
     x: float
@@ -61,17 +72,26 @@ class PanicSource:
     decay_rate: float = PANIC_DECAY_RATE
     source_type: str = "fire"
     """Human-readable hazard type tag used for symbol selection and logging."""
+    block_radius: float = HAZARD_BLOCK_RADIUS
+    """Navigation-block radius (m); distinct from the panic ``radius``."""
+    blocks_navigation: bool = True
+    """Whether this hazard blocks flow-field cells (re-routing) when active."""
 
     def __post_init__(self) -> None:
         """Validate field constraints on construction.
 
         Raises:
-            ValueError: If ``radius`` is not positive, ``decay_rate`` is
-                negative, or ``intensity`` is outside ``[0, 1]``.
+            ValueError: If ``radius`` or ``block_radius`` is not positive,
+                ``decay_rate`` is negative, or ``intensity`` is outside
+                ``[0, 1]``.
         """
         if self.radius <= 0.0:
             raise ValueError(
                 f"radius must be positive, got {self.radius!r}"
+            )
+        if self.block_radius <= 0.0:
+            raise ValueError(
+                f"block_radius must be positive, got {self.block_radius!r}"
             )
         if self.decay_rate < 0.0:
             raise ValueError(

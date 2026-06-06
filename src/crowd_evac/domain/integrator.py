@@ -30,6 +30,10 @@ from crowd_evac.domain.constants import (
 def step(
     state: AgentState,
     acceleration: npt.NDArray[np.float64],
+    *,
+    max_accel: float = MAX_ACCEL,
+    max_speed: float = MAX_SPEED,
+    panic_speed_multiplier: float = PANIC_SPEED_MULTIPLIER,
 ) -> None:
     """Apply one semi-implicit Euler step to all active agents in place.
 
@@ -37,14 +41,20 @@ def step(
 
     Clamping order:
 
-    - Acceleration magnitude is clamped to ``MAX_ACCEL`` before integration.
+    - Acceleration magnitude is clamped to ``max_accel`` before integration.
     - After the velocity update, speed is clamped to the per-agent
-      panic-modulated cap.
+      panic-modulated cap ``max_speed * (1 + panic * (panic_speed_multiplier - 1))``.
 
     Args:
         state: Agent state to update in place.
         acceleration: Total per-agent acceleration in m/s², shape ``(N, 2)``.
             Must have the same first-dimension length as ``state.count``.
+        max_accel: Maximum acceleration magnitude clamp in m/s². Defaults to
+            the module constant ``MAX_ACCEL``.
+        max_speed: Base maximum agent speed in m/s for the speed cap. Defaults
+            to the module constant ``MAX_SPEED``.
+        panic_speed_multiplier: Speed boost factor at full panic for the cap.
+            Defaults to the module constant ``PANIC_SPEED_MULTIPLIER``.
 
     Raises:
         ValueError: If ``acceleration.shape[0] != state.count``.
@@ -60,17 +70,17 @@ def step(
 
     a: npt.NDArray[np.float64] = acceleration[active].copy()
 
-    # -- Clamp acceleration magnitude to MAX_ACCEL ------------------------
+    # -- Clamp acceleration magnitude to max_accel ------------------------
     a_mag: npt.NDArray[np.float64] = np.linalg.norm(a, axis=1, keepdims=True)
     safe_amag = np.where(a_mag > 0.0, a_mag, 1.0)
-    a = np.where(a_mag > MAX_ACCEL, a * (MAX_ACCEL / safe_amag), a)
+    a = np.where(a_mag > max_accel, a * (max_accel / safe_amag), a)
 
     # -- Semi-implicit Euler: update velocity first, then position --------
     v_new: npt.NDArray[np.float64] = state.vel[active] + a * DT
 
     # -- Clamp speed to panic-modulated cap --------------------------------
-    speed_cap: npt.NDArray[np.float64] = MAX_SPEED * (
-        1.0 + state.panic[active] * (PANIC_SPEED_MULTIPLIER - 1.0)
+    speed_cap: npt.NDArray[np.float64] = max_speed * (
+        1.0 + state.panic[active] * (panic_speed_multiplier - 1.0)
     )  # (A,)
     v_mag: npt.NDArray[np.float64] = np.linalg.norm(
         v_new, axis=1, keepdims=True

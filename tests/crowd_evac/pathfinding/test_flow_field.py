@@ -17,7 +17,11 @@ import pytest
 
 from crowd_evac.domain.errors import PathfindingError
 from crowd_evac.domain.floor_plan import Exit, ExitSide, FloorPlan, Wall
-from crowd_evac.pathfinding.flow_field import FlowField
+from crowd_evac.pathfinding.flow_field import (
+    FlowField,
+    build_danger_field,
+    cells_in_radius,
+)
 
 CELL = 1.0
 
@@ -362,3 +366,155 @@ class TestRecompute:
         field = FlowField.build(open_room_fp, cell_size=CELL)
         rerouted = field.recompute([(-1, -1), (99, 99)])
         assert np.array_equal(field.direction, rerouted.direction)
+
+
+# ---------------------------------------------------------------------------
+# Absolute re-blocking via with_blocks (restoration — bug-fix for the
+# permanent-block defect)
+# ---------------------------------------------------------------------------
+
+
+class TestWithBlocks:
+    """with_blocks replaces the block set, restoring previously-blocked cells."""
+
+    def test_blocked_empty_on_fresh_field(
+        self, open_room_fp: FloorPlan
+    ) -> None:
+        """A freshly built field has an empty blocked set (happy)."""
+        field = FlowField.build(open_room_fp, cell_size=CELL)
+        assert field.blocked == frozenset()
+
+    def test_with_blocks_records_blocked_set(
+        self, two_exit_fp: FloorPlan
+    ) -> None:
+        """with_blocks records exactly the in-bounds cells it blocked."""
+        field = FlowField.build(two_exit_fp, cell_size=CELL)
+        blocked = field.with_blocks([(2, 5), (3, 5)])
+        assert blocked.blocked == frozenset({(2, 5), (3, 5)})
+        assert not np.isfinite(blocked.cost[2, 5])
+
+    def test_with_blocks_restores_previously_blocked_cell(
+        self, two_exit_fp: FloorPlan
+    ) -> None:
+        """Re-solving with a smaller set restores the freed cell's cost (edge).
+
+        This is the core of the permanent-block fix: a cell blocked by one
+        call becomes walkable again when the next absolute set omits it.
+        """
+        field = FlowField.build(two_exit_fp, cell_size=CELL)
+        original = float(field.cost[3, 5])
+
+        blocked = field.with_blocks([(3, 5)])
+        assert not np.isfinite(blocked.cost[3, 5])
+
+        restored = blocked.with_blocks([])  # clear all blocks
+        assert restored.blocked == frozenset()
+        assert restored.cost[3, 5] == pytest.approx(original)
+
+    def test_with_blocks_preserves_pristine_base_across_chain(
+        self, two_exit_fp: FloorPlan
+    ) -> None:
+        """Chained blocks always re-solve from the pristine mask, not the last.
+
+        Block cell A, then (separately) block cell B; A must be walkable again
+        in the B-only field — proving accumulation does not leak across calls.
+        """
+        field = FlowField.build(two_exit_fp, cell_size=CELL)
+        only_b = field.with_blocks([(2, 4)]).with_blocks([(2, 6)])
+        assert only_b.blocked == frozenset({(2, 6)})
+        assert np.isfinite(only_b.cost[2, 4])  # A restored
+        assert not np.isfinite(only_b.cost[2, 6])  # B blocked
+
+    def test_with_blocks_all_exits_raises(
+        self, open_room_fp: FloorPlan
+    ) -> None:
+        """Blocking every exit cell raises PathfindingError (failure)."""
+        field = FlowField.build(open_room_fp, cell_size=CELL)
+        with pytest.raises(PathfindingError, match="exit"):
+            field.with_blocks([(0, 3), (0, 4)])
+
+
+# ---------------------------------------------------------------------------
+# cells_in_radius helper
+# ---------------------------------------------------------------------------
+
+
+class TestCellsInRadius:
+    """cells_in_radius selects grid cells whose centres are within range."""
+
+    def test_centre_cell_selected(self) -> None:
+        """A small radius selects at least the cell containing the point."""
+        cells = cells_in_radius((2.5, 2.5), 0.4, 1.0, (6, 6))
+        assert (2, 2) in cells
+
+    def test_radius_scales_count(self) -> None:
+        """A larger radius selects strictly more cells (happy)."""
+        small = cells_in_radius((2.5, 2.5), 0.5, 1.0, (6, 6))
+        large = cells_in_radius((2.5, 2.5), 2.0, 1.0, (6, 6))
+        assert len(large) > len(small)
+
+    def test_out_of_bounds_clipped(self) -> None:
+        """A point at a corner yields only in-bounds cells (edge)."""
+        cells = cells_in_radius((0.0, 0.0), 1.5, 1.0, (6, 6))
+        assert cells  # non-empty
+        assert all(0 <= r < 6 and 0 <= c < 6 for r, c in cells)
+
+
+# ---------------------------------------------------------------------------
+# Danger-cost routing: agents divert to the next-best exit around a hazard
+# ---------------------------------------------------------------------------
+
+
+class TestDangerField:
+    """build_danger_field shape and graded-cost rerouting via with_hazards."""
+
+    def test_danger_peaks_at_centre_zero_outside(self) -> None:
+        """Danger is 1 at the hazard centre cell and 0 beyond its radius."""
+        # Hazard centred on a cell centre (col 4 -> x=4.5, row 3 -> y=3.5).
+        danger = build_danger_field((6, 8), 1.0, [(4.5, 3.5, 2.0)])
+        assert danger[3, 4] == pytest.approx(1.0)  # exact core cell
+        assert danger[0, 0] == 0.0  # corner, well outside the 2 m radius
+
+    def test_no_hazards_is_all_zero(self) -> None:
+        """An empty hazard list yields an all-zero field (edge)."""
+        danger = build_danger_field((5, 5), 1.0, [])
+        assert not np.any(danger)
+
+    def test_non_positive_radius_skipped(self) -> None:
+        """A hazard with non-positive radius contributes nothing (edge)."""
+        danger = build_danger_field((5, 5), 1.0, [(2.0, 2.0, 0.0)])
+        assert not np.any(danger)
+
+    def test_danger_reroutes_to_other_exit(
+        self, two_exit_fp: FloorPlan
+    ) -> None:
+        """A danger field near the east exit flips an east-bound cell west.
+
+        At (7.5, 3.0) the cell is closer to the east exit, so the plain field
+        routes east; overlaying a strong danger cost around (8, 3) makes the
+        eastward route more expensive than the longer westward detour, so the
+        direction flips — the crowd diverts to the other exit.
+        """
+        field = FlowField.build(two_exit_fp, cell_size=CELL)
+        probe = np.array([[7.5, 3.0]])
+        assert field.sample(probe)[0, 0] > 0.0  # routes east by default
+
+        danger = build_danger_field(field.cost.shape, CELL, [(8.0, 3.0, 3.0)])
+        hazardous = field.with_hazards([], 50.0 * danger)
+        assert hazardous.sample(probe)[0, 0] < 0.0  # now routes west
+
+    def test_danger_keeps_cells_walkable(
+        self, two_exit_fp: FloorPlan
+    ) -> None:
+        """Danger raises cost but never blocks: hazard cells stay finite.
+
+        This is the freeze-avoidance guarantee — a soft cost never produces a
+        zero-direction trap the way a hard block does.
+        """
+        field = FlowField.build(two_exit_fp, cell_size=CELL)
+        danger = build_danger_field(field.cost.shape, CELL, [(8.0, 3.0, 3.0)])
+        hazardous = field.with_hazards([], 50.0 * danger)
+        assert np.all(np.isfinite(hazardous.cost[field.cost != np.inf]))
+        # A cell in the danger core still routes somewhere (non-zero dir).
+        core = hazardous.sample(np.array([[8.0, 3.0]]))
+        assert np.linalg.norm(core[0]) > 0.0

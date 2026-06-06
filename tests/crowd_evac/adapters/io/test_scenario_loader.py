@@ -391,3 +391,137 @@ class TestLectureHallScenario:
         assert sim_config["dt"] == 0.05, "Expected dt=0.05s (fixed timestep)"
         assert "max_ticks" in sim_config
         assert sim_config["max_ticks"] == 10000
+
+
+# ---------------------------------------------------------------------------
+# Emergency events block (Phase 2, Step 2.9) — optional scripted hazards
+# ---------------------------------------------------------------------------
+
+
+def _scenario_with_events(
+    base: dict[str, object], events: object
+) -> dict[str, object]:
+    """Return a copy of *base* with its events block replaced by *events*."""
+    return {**base, "events": events}
+
+
+class TestEventParsing:
+    """Validation and round-trip of the optional scenario events block."""
+
+    def test_absent_events_default_to_empty(
+        self, scenario_file: Path
+    ) -> None:
+        """A scenario without an events key loads with an empty events list."""
+        _, data = load_scenario_file(scenario_file)
+        assert data.get("events", []) == []
+
+    def test_valid_event_round_trips(
+        self, tmp_path: Path, valid_scenario_dict: dict[str, object]
+    ) -> None:
+        """A well-formed event preserves tick, type, pos and optional fields."""
+        scenario = _scenario_with_events(
+            valid_scenario_dict,
+            [{
+                "tick": 120,
+                "type": "place_panic_source",
+                "pos": [5.0, 4.0],
+                "intensity": 0.8,
+                "source_type": "fire",
+            }],
+        )
+        path = tmp_path / "with_event.json"
+        path.write_text(json.dumps(scenario), encoding="utf-8")
+        _, data = load_scenario_file(path)
+        events = data["events"]
+        assert len(events) == 1
+        event = events[0]
+        assert event["tick"] == 120
+        assert event["type"] == "place_panic_source"
+        assert event["pos"] == [5.0, 4.0]
+        assert event["intensity"] == 0.8
+        assert event["source_type"] == "fire"
+
+    def test_minimal_event_omits_optional_fields(
+        self, tmp_path: Path, valid_scenario_dict: dict[str, object]
+    ) -> None:
+        """An event with only the required keys carries no optional keys."""
+        scenario = _scenario_with_events(
+            valid_scenario_dict,
+            [{"tick": 0, "type": "place_panic_source", "pos": [1.0, 1.0]}],
+        )
+        path = tmp_path / "minimal_event.json"
+        path.write_text(json.dumps(scenario), encoding="utf-8")
+        _, data = load_scenario_file(path)
+        event = data["events"][0]
+        assert "intensity" not in event
+        assert "radius" not in event
+
+    def test_events_not_a_list_raises(
+        self, tmp_path: Path, valid_scenario_dict: dict[str, object]
+    ) -> None:
+        """A non-list events value raises MalformedScenarioError."""
+        scenario = _scenario_with_events(valid_scenario_dict, {"tick": 1})
+        path = tmp_path / "events_not_list.json"
+        path.write_text(json.dumps(scenario), encoding="utf-8")
+        with pytest.raises(MalformedScenarioError, match="events must be"):
+            load_scenario_file(path)
+
+    def test_unsupported_event_type_raises(
+        self, tmp_path: Path, valid_scenario_dict: dict[str, object]
+    ) -> None:
+        """An unknown event type raises MalformedScenarioError."""
+        scenario = _scenario_with_events(
+            valid_scenario_dict,
+            [{"tick": 1, "type": "detonate", "pos": [1.0, 1.0]}],
+        )
+        path = tmp_path / "bad_type.json"
+        path.write_text(json.dumps(scenario), encoding="utf-8")
+        with pytest.raises(MalformedScenarioError, match="unsupported type"):
+            load_scenario_file(path)
+
+    def test_negative_tick_raises(
+        self, tmp_path: Path, valid_scenario_dict: dict[str, object]
+    ) -> None:
+        """A negative firing tick raises MalformedScenarioError."""
+        scenario = _scenario_with_events(
+            valid_scenario_dict,
+            [{"tick": -5, "type": "place_panic_source", "pos": [1.0, 1.0]}],
+        )
+        path = tmp_path / "neg_tick.json"
+        path.write_text(json.dumps(scenario), encoding="utf-8")
+        with pytest.raises(MalformedScenarioError, match="tick must be >= 0"):
+            load_scenario_file(path)
+
+    def test_bad_pos_length_raises(
+        self, tmp_path: Path, valid_scenario_dict: dict[str, object]
+    ) -> None:
+        """A pos that is not a two-element list raises MalformedScenarioError."""
+        scenario = _scenario_with_events(
+            valid_scenario_dict,
+            [{"tick": 1, "type": "place_panic_source", "pos": [1.0]}],
+        )
+        path = tmp_path / "bad_pos.json"
+        path.write_text(json.dumps(scenario), encoding="utf-8")
+        with pytest.raises(MalformedScenarioError, match="pos must be"):
+            load_scenario_file(path)
+
+    def test_missing_required_event_field_raises(
+        self, tmp_path: Path, valid_scenario_dict: dict[str, object]
+    ) -> None:
+        """An event missing pos raises MalformedScenarioError."""
+        scenario = _scenario_with_events(
+            valid_scenario_dict,
+            [{"tick": 1, "type": "place_panic_source"}],
+        )
+        path = tmp_path / "missing_pos.json"
+        path.write_text(json.dumps(scenario), encoding="utf-8")
+        with pytest.raises(MalformedScenarioError, match="pos"):
+            load_scenario_file(path)
+
+    def test_hazard_lecture_hall_bundled_event_loads(self) -> None:
+        """The bundled hazard_lecture_hall carries one place_panic_source event."""
+        _, data = load_bundled_scenario("hazard_lecture_hall")
+        events = data["events"]
+        assert len(events) == 1
+        assert events[0]["type"] == "place_panic_source"
+        assert events[0]["tick"] == 100

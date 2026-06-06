@@ -1,0 +1,65 @@
+{
+  "schema_version": "1.0",
+  "name": "open_room_search",
+  "floor_plan": {
+    "width_m": 20.0,
+    "height_m": 15.0,
+    "walls": [
+      {
+        "x": 0.0,
+        "y": 0.0,
+        "width": 20.0,
+        "height": 0.5,
+        "label": "south_wall"
+      },
+      {
+        "x": 0.0,
+        "y": 14.5,
+        "width": 20.0,
+        "height": 0.5,
+        "label": "north_wall"
+      },
+      {
+        "x": 0.0,
+        "y": 0.0,
+        "width": 0.5,
+        "height": 15.0,
+        "label": "west_wall"
+      },
+      {
+        "x": 19.5,
+        "y": 0.0,
+        "width": 0.5,
+        "height": 15.0,
+        "label": "east_wall"
+      }
+    ],
+    "obstacles": [],
+    "exits": [
+      {
+        "x": 10.0,
+        "y": 14.5,
+        "width_m": 3.0,
+        "side": "north",
+        "capacity_per_second": 5,
+        "label": "north_exit"
+      },
+      {
+        "x": 19.5,
+        "y": 7.5,
+        "width_m": 2.0,
+        "side": "east",
+        "capacity_per_second": 3,
+        "label": "east_exit"
+      }
+    ]
+  },
+  "agents": {
+    "count": 25,
+    "spawn_seed": 42
+  },
+  "simulation": {
+    "dt": 0.05,
+    "max_ticks": 10000
+  }
+}

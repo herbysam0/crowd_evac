@@ -1,0 +1,72 @@
+{
+  "schema_version": "1.0",
+  "name": "bottleneck_corridor",
+  "floor_plan": {
+    "width_m": 15.0,
+    "height_m": 10.0,
+    "walls": [
+      {
+        "x": 0.0,
+        "y": 0.0,
+        "width": 15.0,
+        "height": 0.5,
+        "label": "south_wall"
+      },
+      {
+        "x": 0.0,
+        "y": 9.5,
+        "width": 15.0,
+        "height": 0.5,
+        "label": "north_wall"
+      },
+      {
+        "x": 0.0,
+        "y": 0.0,
+        "width": 0.5,
+        "height": 10.0,
+        "label": "west_wall"
+      },
+      {
+        "x": 14.5,
+        "y": 0.0,
+        "width": 0.5,
+        "height": 10.0,
+        "label": "east_wall"
+      }
+    ],
+    "obstacles": [
+      {
+        "x": 9.5,
+        "y": 0.5,
+        "width": 0.5,
+        "height": 3.9,
+        "label": "divider_south"
+      },
+      {
+        "x": 9.5,
+        "y": 5.6,
+        "width": 0.5,
+        "height": 3.9,
+        "label": "divider_north"
+      }
+    ],
+    "exits": [
+      {
+        "x": 14.5,
+        "y": 5.0,
+        "width_m": 4.0,
+        "side": "east",
+        "capacity_per_second": 20,
+        "label": "outflow_exit"
+      }
+    ]
+  },
+  "agents": {
+    "count": 60,
+    "spawn_seed": 7
+  },
+  "simulation": {
+    "dt": 0.05,
+    "max_ticks": 8000
+  }
+}

@@ -16,7 +16,12 @@ from __future__ import annotations
 
 import pytest
 
-from crowd_evac.domain.constants import DT, PANIC_DECAY_RATE, PANIC_RANGE
+from crowd_evac.domain.constants import (
+    DT,
+    HAZARD_BLOCK_RADIUS,
+    PANIC_DECAY_RATE,
+    PANIC_RANGE,
+)
 from crowd_evac.domain.panic_source import PanicSource, _EXPIRED_THRESHOLD
 
 
@@ -35,6 +40,31 @@ class TestPanicSourceConstruction:
         assert s.radius == PANIC_RANGE
         assert s.decay_rate == PANIC_DECAY_RATE
         assert s.is_active
+
+    def test_block_radius_defaults_and_decoupled_from_radius(self) -> None:
+        """block_radius defaults to HAZARD_BLOCK_RADIUS, separate from radius."""
+        s = PanicSource(x=1.0, y=2.0)
+        assert s.block_radius == HAZARD_BLOCK_RADIUS
+        assert s.block_radius < s.radius  # physical footprint < fear radius
+        assert s.blocks_navigation is True
+
+    def test_block_radius_and_blocks_navigation_explicit(self) -> None:
+        """Explicit block_radius and blocks_navigation are preserved."""
+        s = PanicSource(
+            x=0.0, y=0.0, block_radius=2.5, blocks_navigation=False
+        )
+        assert s.block_radius == 2.5
+        assert s.blocks_navigation is False
+
+    def test_zero_block_radius_raises(self) -> None:
+        """block_radius=0.0 must raise ValueError."""
+        with pytest.raises(ValueError, match="block_radius must be positive"):
+            PanicSource(x=0.0, y=0.0, block_radius=0.0)
+
+    def test_negative_block_radius_raises(self) -> None:
+        """Negative block_radius must raise ValueError."""
+        with pytest.raises(ValueError, match="block_radius must be positive"):
+            PanicSource(x=0.0, y=0.0, block_radius=-1.0)
 
     def test_explicit_parameters_stored(self) -> None:
         """Explicit arguments are preserved exactly."""

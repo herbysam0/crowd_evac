@@ -52,6 +52,9 @@ dmypy.json
 .env
 .env.local
 
+# Phase-2 calibration artifacts (Pareto fronts, checkpoints, chosen weights)
+artifacts/
+
 # OS-specific
 Thumbs.db
 .DS_Store
