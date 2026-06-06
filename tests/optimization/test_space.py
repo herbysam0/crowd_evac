@@ -13,6 +13,7 @@ Fast tests use synthetic data only — no real simulation.  Integration tests
 """
 from __future__ import annotations
 
+import logging
 from unittest.mock import patch
 
 import numpy as np
@@ -30,6 +31,8 @@ from crowd_evac.optimization.space import (
     sample_space,
     validate_defaults,
 )
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -380,30 +383,72 @@ class TestComputeSensitivity:
 class TestRunSensitivityPrepassE2E:
     """End-to-end wiring of the sensitivity pre-pass with the real harness."""
 
+    _N_SAMPLES: int = 4
+    _N_E2E: int = 3  # total e2e test methods in this class
+
     def test_returns_sensitivity_and_fitness_list(self) -> None:
         """run_sensitivity_prepass returns (SensitivityResult, list[FitnessResult])."""
+        from crowd_evac.optimization.fitness import evaluate_fitness as _real
+
+        n, counter = self._N_SAMPLES, [0]
+
+        def _tracked(params: ForceParams, config: FitnessConfig | None = None) -> FitnessResult:
+            counter[0] += 1
+            msg = f"  sample {counter[0]} of {n}"
+            print(msg, flush=True)
+            logger.info(msg)
+            return _real(params, config)
+
+        print(f"\n[E2E 1/{self._N_E2E}] test_returns_sensitivity_and_fitness_list", flush=True)
+        logger.info("[E2E 1/%d] test_returns_sensitivity_and_fitness_list", self._N_E2E)
         cfg = FitnessConfig(max_workers=1)
-        sens, fitness_list = run_sensitivity_prepass(
-            n_samples=4,
-            config=cfg,
-            seed=0,
-            method="lhs",
-        )
+        with patch("crowd_evac.optimization.space.evaluate_fitness", side_effect=_tracked):
+            sens, fitness_list = run_sensitivity_prepass(
+                n_samples=n, config=cfg, seed=0, method="lhs"
+            )
         assert isinstance(sens, SensitivityResult)
-        assert len(fitness_list) == 4
+        assert len(fitness_list) == n
         assert all(isinstance(fr, FitnessResult) for fr in fitness_list)
 
     def test_sensitivity_has_n_params_entries(self) -> None:
         """Sensitivity result from the real pre-pass has N_PARAMS entries."""
+        from crowd_evac.optimization.fitness import evaluate_fitness as _real
+
+        n, counter = self._N_SAMPLES, [0]
+
+        def _tracked(params: ForceParams, config: FitnessConfig | None = None) -> FitnessResult:
+            counter[0] += 1
+            msg = f"  sample {counter[0]} of {n}"
+            print(msg, flush=True)
+            logger.info(msg)
+            return _real(params, config)
+
+        print(f"\n[E2E 2/{self._N_E2E}] test_sensitivity_has_n_params_entries", flush=True)
+        logger.info("[E2E 2/%d] test_sensitivity_has_n_params_entries", self._N_E2E)
         cfg = FitnessConfig(max_workers=1)
-        sens, _ = run_sensitivity_prepass(n_samples=4, config=cfg, seed=0)
+        with patch("crowd_evac.optimization.space.evaluate_fitness", side_effect=_tracked):
+            sens, _ = run_sensitivity_prepass(n_samples=n, config=cfg, seed=0)
         assert len(sens.abs_spearman_realism) == N_PARAMS
         assert len(sens.rank_combined) == N_PARAMS
 
     def test_fitness_results_have_finite_objectives(self) -> None:
         """All fitness results carry finite, non-negative objectives."""
+        from crowd_evac.optimization.fitness import evaluate_fitness as _real
+
+        n, counter = self._N_SAMPLES, [0]
+
+        def _tracked(params: ForceParams, config: FitnessConfig | None = None) -> FitnessResult:
+            counter[0] += 1
+            msg = f"  sample {counter[0]} of {n}"
+            print(msg, flush=True)
+            logger.info(msg)
+            return _real(params, config)
+
+        print(f"\n[E2E 3/{self._N_E2E}] test_fitness_results_have_finite_objectives", flush=True)
+        logger.info("[E2E 3/%d] test_fitness_results_have_finite_objectives", self._N_E2E)
         cfg = FitnessConfig(max_workers=1)
-        _, fitness_list = run_sensitivity_prepass(n_samples=4, config=cfg, seed=0)
+        with patch("crowd_evac.optimization.space.evaluate_fitness", side_effect=_tracked):
+            _, fitness_list = run_sensitivity_prepass(n_samples=n, config=cfg, seed=0)
         for fr in fitness_list:
             realism, evac = fr.objectives
             assert np.isfinite(realism) and realism >= 0.0

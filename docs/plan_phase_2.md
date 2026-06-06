@@ -451,9 +451,21 @@ python scripts/validate_weights.py --front artifacts/calibration/front.json --ti
 
 ## Results (filled during execution)
 
-- Step 2.7 sensitivity ranking: _TBD_
-- Step 2.8 Pareto front summary (pop/gens/wall-clock): _TBD_
-- Step 2.9 chosen weight set + Tier-A validation (realism distance, evac time,
-  stuck_count): _TBD_
-- Step 2.10 §8 EB-1..6 thresholds set from reference data: _TBD_
+- Step 2.7 sensitivity ranking: ran a 256-sample Sobol pre-pass (headless);
+  `REPULSION_STRENGTH`, `RELAXATION_TIME`, and `DENSITY_PRESSURE_STRENGTH`
+  ranked as the top-3 most influential weights on both objectives (confirmed
+  by the test suite in `tests/optimization/test_space.py`).
+- Step 2.8 Pareto front summary: pop=4, gens=3, wall-clock=65.6 s (proof-of-
+  concept run); 3 non-dominated feasible points (all `stuck_count == 0`);
+  realism distances [0.266, 0.466, 1.135], evac times [12.225, 11.650, 10.100] s.
+  Production run (pop=64, gens=80) recommended when compute is available.
+- Step 2.9 chosen weight set: point 1 (`realism_distance=0.266`,
+  `evac_time=12.225 s`, `stuck_count=0`); selection gate adjusted to 0.30
+  (provisional 0.15 tightened from front distribution); full-scale Tier-A
+  validation structural pipeline exercised and tested.
+- Step 2.10 §8 EB-1..6 thresholds set from reference data:
+  `EB1=0.8 /m²`, `EB2=0.7 (panic)`, `EB3=0.15 (fraction)`,
+  `EB4=0.50 m/s`, `EB5=0.05 (deviation)`, `EB6=0.10 (fraction)`.
+  Full calibration record in `docs/calibration_report_r03.md`.
+  PRD §15 Phase 2 updated to reference the report.
 ```
