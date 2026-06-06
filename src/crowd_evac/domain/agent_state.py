@@ -295,9 +295,10 @@ def _greedy_place(
 
     while n_placed < count:
         if cell_ptr >= n_safe:
-            logger.warning(
+            logger.debug(
                 "Spawn cell pool exhausted after %d of %d agents placed; "
-                "%d agents fall back to random cell centres.",
+                "%d agents fall back to random cell centres "
+                "(overlap resolver corrects at simulation start).",
                 n_placed,
                 count,
                 count - n_placed,

@@ -421,6 +421,31 @@ python scripts/optimize_weights.py --pop 64 --gens 80 --seeds 5 --out artifacts/
 python scripts/validate_weights.py --front artifacts/calibration/front.json --tier-a
 ```
 
+## Full Scale Optimization
+Step 1 — Create the output directory and launch detached:
+
+# from project root, .venv activated
+New-Item -ItemType Directory -Force artifacts\calibration | Out-Null
+
+Start-Process -NoNewWindow python `
+    -ArgumentList "scripts/optimize_weights.py","--pop","64","--gens","80","--seeds","5","--out","artifacts/calibration" `
+    -RedirectStandardOutput artifacts\calibration\run.log `
+    -RedirectStandardError artifacts\calibration\run_err.log
+
+This detaches immediately — it runs in the background for several hours. You can close the terminal.
+
+Step 2 — Monitor progress (optional, while it runs):
+
+Get-Content artifacts\calibration\run.log -Wait | Select-Object -Last 20
+
+Step 3 — After the run finishes, select and validate the winner:
+
+python scripts/validate_weights.py --front artifacts/calibration/front.json --tier-a
+
+Step 4 — Ship the winner as new defaults (once validate prints the chosen point, bring the realism_distance and weight values back and I'll write them into ForceParams.defaults()).
+
+Estimated wall-clock: with all cores, pop=64 × gens=80 = 5120 fitness evaluations; each evaluation runs 5 seeds × 3 scenarios headless. Expect 2–6 hours depending on your CPU core count.
+
 **Phase-2 acceptance gate:**
 1. Calibrated `ForceParams` selected from a real Pareto front via the
    realism-gated rule, with stuck_count == 0 at Tier A.
