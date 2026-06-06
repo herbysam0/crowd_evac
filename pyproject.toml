@@ -29,6 +29,12 @@ dev = [
     "mypy>=1.5.0",
     "flake8>=6.1.0",
 ]
+# Phase-2 calibration only (Step 2.8). Not needed to run the game; pymoo pulls
+# in the NSGA-II implementation. Pinned to the 0.6 line (pre-1.0; the locked
+# optimiser per docs/plan_phase_2.md). Apache-2.0; ships Windows wheels.
+optimize = [
+    "pymoo>=0.6.1,<0.7",
+]
 
 [project.scripts]
 crowd-evac = "crowd_evac.application.cli:main"
@@ -50,6 +56,12 @@ warn_unused_configs = true
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
 check_untyped_defs = true
+
+# pymoo (Step 2.8) ships no type information; cupy is an optional GPU backend
+# probed at runtime. Treat both as untyped / possibly-absent third-party.
+[[tool.mypy.overrides]]
+module = ["pymoo.*", "cupy"]
+ignore_missing_imports = true
 
 [tool.flake8]
 max-line-length = 88

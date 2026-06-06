@@ -381,7 +381,7 @@ def _safe_spearman(x: npt.NDArray[np.float64], y: npt.NDArray[np.float64]) -> fl
         Absolute Spearman rank correlation in ``[0, 1]``.
     """
     try:
-        from scipy.stats import spearmanr  # type: ignore[import-untyped]
+        from scipy.stats import spearmanr
     except ImportError as exc:
         raise ImportError(
             "scipy is required for sensitivity analysis; "
