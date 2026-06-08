@@ -410,7 +410,7 @@ def main() -> None:
         PathfindingError: If the floor plan has no walkable exit.
     """
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.WARNING,
         format="%(levelname)s %(name)s: %(message)s",
     )
     sim, floor_plan = build_simulation_from_scenario(DEFAULT_SCENARIO)

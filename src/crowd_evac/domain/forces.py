@@ -194,24 +194,29 @@ def f_crowd(
 
     out: Vec2Array = np.zeros((state.count, 2), dtype=np.float64)
     sh = _resolve_hash(state, spatial_hash, radius)
-    gi, gj = sh.query_pairs()
+    gi, _ = sh.query_pairs()
     if gi.size == 0:
         return out
 
-    delta: Vec2Array = state.pos[gi] - state.pos[gj]  # points j -> i
-    dist: npt.NDArray[np.float64] = np.linalg.norm(delta, axis=1)
-    close = (dist < radius) & (dist > 0.0)
+    delta, dist_sq = sh.pair_offsets(state)  # delta points j -> i
+    # Mask on squared distance; the costly square root is taken only for the
+    # in-range subset below.
+    close = (dist_sq < radius * radius) & (dist_sq > 0.0)
     if not np.any(close):
         return out
 
     gi_c = gi[close]
     delta_c = delta[close]
-    dist_c = dist[close]
+    dist_c = np.sqrt(dist_sq[close])
     d_clamped = np.maximum(dist_c, min_distance)
     magnitude = strength * (radius - dist_c) / d_clamped  # (P,)
-    direction = delta_c / dist_c[:, np.newaxis]           # unit j -> i
-    contrib: Vec2Array = direction * magnitude[:, np.newaxis]
-    np.add.at(out, gi_c, contrib)
+    # contrib = (delta_c / dist_c) * magnitude; fold the two scalar divides
+    # into one per-pair factor to halve the elementwise work.
+    factor: npt.NDArray[np.float64] = magnitude / dist_c  # (P,)
+    n = state.count
+    # bincount is far faster than the unbuffered np.add.at scatter.
+    out[:, 0] = np.bincount(gi_c, weights=delta_c[:, 0] * factor, minlength=n)
+    out[:, 1] = np.bincount(gi_c, weights=delta_c[:, 1] * factor, minlength=n)
     return out
 
 
@@ -320,28 +325,30 @@ def f_herd(
     if gi.size == 0:
         return out
 
-    dist: npt.NDArray[np.float64] = np.linalg.norm(
-        state.pos[gi] - state.pos[gj], axis=1
-    )
-    within = dist < radius
+    _, dist_sq = sh.pair_offsets(state)
+    # Alignment only needs an in-range mask, so compare squared distances and
+    # skip the per-pair square root entirely.
+    within = dist_sq < radius * radius
     if not np.any(within):
         return out
 
     gi_w = gi[within]
     gj_w = gj[within]
-    vel_sum: Vec2Array = np.zeros((state.count, 2), dtype=np.float64)
-    np.add.at(vel_sum, gi_w, state.vel[gj_w])
-    counts: npt.NDArray[np.intp] = np.zeros(state.count, dtype=np.intp)
-    np.add.at(counts, gi_w, 1)
+    n = state.count
+    vel = state.vel
+    # bincount-with-weights replaces the slow np.add.at scatter for the
+    # per-agent neighbour velocity sum and neighbour count.
+    vel_sum0 = np.bincount(gi_w, weights=vel[gj_w, 0], minlength=n)
+    vel_sum1 = np.bincount(gi_w, weights=vel[gj_w, 1], minlength=n)
+    counts = np.bincount(gi_w, minlength=n)
 
     has_neighbours = counts > 0
-    mean_vel: Vec2Array = (
-        vel_sum[has_neighbours] / counts[has_neighbours][:, np.newaxis]
-    )
-    panic_h = state.panic[has_neighbours][:, np.newaxis]
-    out[has_neighbours] = (
-        strength * panic_h * (mean_vel - state.vel[has_neighbours])
-    )
+    inv_counts = 1.0 / counts[has_neighbours]
+    mean0 = vel_sum0[has_neighbours] * inv_counts
+    mean1 = vel_sum1[has_neighbours] * inv_counts
+    scale = strength * state.panic[has_neighbours]
+    out[has_neighbours, 0] = scale * (mean0 - vel[has_neighbours, 0])
+    out[has_neighbours, 1] = scale * (mean1 - vel[has_neighbours, 1])
     return out
 
 

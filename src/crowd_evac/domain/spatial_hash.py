@@ -79,6 +79,9 @@ class SpatialHash:
         self._indices: Int1D = indices.astype(np.intp)
         self._count = int(positions.shape[0])
         self._pairs: tuple[Int1D, Int1D] | None = None
+        # Per-pair (delta, squared-distance), computed once and shared by the
+        # crowd force terms that reuse this hash within a tick.
+        self._pair_off: tuple[Vec2Array, npt.NDArray[np.float64]] | None = None
 
         if self._count == 0:
             # Degenerate grid; query_pairs short-circuits on empty input.
@@ -182,6 +185,50 @@ class SpatialHash:
         self._pairs = (gi, gj)
         return self._pairs
 
+    def pair_offsets(
+        self, state: AgentState
+    ) -> tuple[Vec2Array, npt.NDArray[np.float64]]:
+        """Return per-pair displacement and squared distance, computed once.
+
+        For the candidate pairs from :meth:`query_pairs`, this computes
+        ``delta = pos[i] - pos[j]`` and ``|delta|**2`` a single time and caches
+        the result on the instance.  The three crowd force terms that share
+        one hash per tick (repulsion, density, herd) then reuse this rather
+        than recomputing the displacement and norm three times.
+
+        Squared distance — not distance — is returned so callers needing only
+        a radius mask (herd alignment, density counting) avoid the square root
+        entirely; :func:`~crowd_evac.domain.forces.f_crowd` takes the root of
+        just the in-range subset.
+
+        The squared distance is computed with :func:`numpy.einsum`, which is
+        markedly faster than :func:`numpy.linalg.norm` for the ``(P, 2)`` case
+        as it avoids the intermediate ``abs`` and ufunc-reduce overhead.
+
+        Args:
+            state: The population this hash indexes; positions are read by the
+                global indices returned from :meth:`query_pairs`.  The same
+                state must be passed across calls within a tick, since the
+                result is cached against the first call's positions.
+
+        Returns:
+            Tuple ``(delta, dist_sq)`` where ``delta`` has shape ``(P, 2)`` in
+            metres and ``dist_sq`` shape ``(P,)`` in metres squared.  Both are
+            empty when fewer than two agents are indexed.
+        """
+        if self._pair_off is not None:
+            return self._pair_off
+
+        gi, gj = self.query_pairs()
+        if gi.size == 0:
+            delta: Vec2Array = np.empty((0, 2), dtype=np.float64)
+            dist_sq: npt.NDArray[np.float64] = np.empty(0, dtype=np.float64)
+        else:
+            delta = state.pos[gi] - state.pos[gj]
+            dist_sq = np.einsum("ij,ij->i", delta, delta)
+        self._pair_off = (delta, dist_sq)
+        return self._pair_off
+
     def neighbour_counts(self, state: AgentState, radius: float) -> Int1D:
         """Count, per agent, how many other agents lie within ``radius``.
 
@@ -208,11 +255,14 @@ class SpatialHash:
                 f"({self.cell_size!r})"
             )
         counts: Int1D = np.zeros(state.count, dtype=np.intp)
-        gi, gj = self.query_pairs()
+        gi, _ = self.query_pairs()
         if gi.size == 0:
             return counts
-        delta: Vec2Array = state.pos[gi] - state.pos[gj]
-        dist: npt.NDArray[np.float64] = np.linalg.norm(delta, axis=1)
-        within = gi[dist < radius]
-        np.add.at(counts, within, 1)
-        return counts
+        _, dist_sq = self.pair_offsets(state)
+        # Compare squared distances to avoid a full-array square root.
+        within = gi[dist_sq < radius * radius]
+        if within.size == 0:
+            return counts
+        return np.bincount(within, minlength=state.count).astype(
+            np.intp, copy=False
+        )
