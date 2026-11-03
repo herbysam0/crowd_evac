@@ -38,37 +38,72 @@
       {
         "x": 5.0,
         "y": 7.0,
-        "width": 40.0,
+        "width": 17.0,
         "height": 1.0,
-        "label": "seating_row_1"
+        "label": "seating_row_1_left"
+      },
+      {
+        "x": 28.0,
+        "y": 7.0,
+        "width": 17.0,
+        "height": 1.0,
+        "label": "seating_row_1_right"
       },
       {
         "x": 5.0,
         "y": 10.0,
-        "width": 40.0,
+        "width": 17.0,
         "height": 1.0,
-        "label": "seating_row_2"
+        "label": "seating_row_2_left"
+      },
+      {
+        "x": 28.0,
+        "y": 10.0,
+        "width": 17.0,
+        "height": 1.0,
+        "label": "seating_row_2_right"
       },
       {
         "x": 5.0,
         "y": 13.0,
-        "width": 40.0,
+        "width": 17.0,
         "height": 1.0,
-        "label": "seating_row_3"
+        "label": "seating_row_3_left"
+      },
+      {
+        "x": 28.0,
+        "y": 13.0,
+        "width": 17.0,
+        "height": 1.0,
+        "label": "seating_row_3_right"
       },
       {
         "x": 5.0,
         "y": 16.0,
-        "width": 40.0,
+        "width": 17.0,
         "height": 1.0,
-        "label": "seating_row_4"
+        "label": "seating_row_4_left"
+      },
+      {
+        "x": 28.0,
+        "y": 16.0,
+        "width": 17.0,
+        "height": 1.0,
+        "label": "seating_row_4_right"
       },
       {
         "x": 5.0,
         "y": 19.0,
-        "width": 40.0,
+        "width": 17.0,
         "height": 1.0,
-        "label": "seating_row_5"
+        "label": "seating_row_5_left"
+      },
+      {
+        "x": 28.0,
+        "y": 19.0,
+        "width": 17.0,
+        "height": 1.0,
+        "label": "seating_row_5_right"
       }
     ],
     "exits": [
