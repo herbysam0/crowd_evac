@@ -1,12 +1,10 @@
 """Canvas drawing and metre/pixel mapping for the room designer.
 
-Pure helpers (:class:`Viewport`, :func:`selection_rect`,
+Pure helpers (:func:`selection_rect`,
 :func:`band_label`) need no GL context; the ``draw_*`` functions issue
 arcade draw calls and run inside the window's ``on_draw``.
 """
 from __future__ import annotations
-
-from dataclasses import dataclass
 
 import arcade
 from arcade.types import RGBA255
@@ -18,6 +16,7 @@ from crowd_evac.adapters.render.arcade_renderer import (
     WALL_COLOR,
 )
 from crowd_evac.adapters.render.designer_style import LABEL_BG_COLOR
+from crowd_evac.adapters.render.viewport import Viewport
 from crowd_evac.designer.controller import RubberBand, Tool
 from crowd_evac.designer.geometry import Rect, wall_rect
 from crowd_evac.designer.layout import Layout
@@ -49,43 +48,6 @@ TOOL_HINTS: dict[Tool, str] = {
     Tool.DOORWAY: "Doorway: click a wall on the room boundary",
     Tool.OBSTACLE: "Obstacle: drag a rectangle",
 }
-
-
-@dataclass(frozen=True)
-class Viewport:
-    """Linear mapping between world metres and window pixels."""
-
-    ppm: float
-    ox: float
-    oy: float
-
-    def to_world(self, px: float, py: float) -> tuple[float, float]:
-        """Convert window pixels to world metres."""
-        return ((px - self.ox) / self.ppm, (py - self.oy) / self.ppm)
-
-    def to_px(self, x: float, y: float) -> tuple[float, float]:
-        """Convert world metres to window pixels."""
-        return (self.ox + x * self.ppm, self.oy + y * self.ppm)
-
-    def lrbt(self, rect: Rect) -> tuple[float, float, float, float]:
-        """Return a world rectangle as pixel ``(left, right, bottom, top)``."""
-        x, y, w, h = rect
-        left, bottom = self.to_px(x, y)
-        return (left, left + w * self.ppm, bottom, bottom + h * self.ppm)
-
-
-def fit_viewport(
-    room_w: float, room_h: float, canvas_w: float, canvas_h: float
-) -> Viewport:
-    """Scale the room to fill the canvas area, centred, with a margin."""
-    avail_w = max(canvas_w - 2 * CANVAS_MARGIN_PX, 1.0)
-    avail_h = max(canvas_h - 2 * CANVAS_MARGIN_PX, 1.0)
-    ppm = min(avail_w / room_w, avail_h / room_h)
-    return Viewport(
-        ppm,
-        (canvas_w - room_w * ppm) / 2.0,
-        (canvas_h - room_h * ppm) / 2.0,
-    )
 
 
 def fit_window_size(

@@ -18,6 +18,7 @@ from __future__ import annotations
 import enum
 import logging
 from collections.abc import Sequence
+from typing import Literal
 
 import arcade
 
@@ -25,6 +26,7 @@ from crowd_evac.adapters.io.scenario_catalog import list_bundled_scenarios
 from crowd_evac.adapters.io.scenario_loader import load_bundled_scenario
 from crowd_evac.adapters.render.arcade_input import ArcadeInputSource
 from crowd_evac.adapters.render.arcade_renderer import ArcadeRenderer
+from crowd_evac.adapters.render.viewport import Viewport, fit_viewport
 from crowd_evac.application.cli_args import (
     DEFAULT_SCENARIO,
     build_parser,
@@ -69,6 +71,10 @@ window does not clip against screen edges.
 
 _MIN_PPM: float = 5.0
 """Hard lower bound on pixels-per-meter to keep geometry legible."""
+
+MIN_WINDOW_W_PX: int = 320
+MIN_WINDOW_H_PX: int = 240
+"""Smallest window the user can resize to; keeps hints and room legible."""
 
 
 class _SimState(enum.Enum):
@@ -297,7 +303,10 @@ class EvacWindow(arcade.Window):
         ppm = compute_fit_ppm(floor_plan)
         width_px = int(floor_plan.width_m * ppm)
         height_px = int(floor_plan.height_m * ppm)
-        super().__init__(width_px, height_px, WINDOW_TITLE)
+        # on_resize can fire inside super().__init__, before the adapters
+        # below exist; it checks for them and returns early.
+        super().__init__(width_px, height_px, WINDOW_TITLE, resizable=True)
+        self.set_minimum_size(MIN_WINDOW_W_PX, MIN_WINDOW_H_PX)
 
         self._sim = sim
         self._scenario_name = scenario_name
@@ -313,6 +322,7 @@ class EvacWindow(arcade.Window):
         self._renderer = ArcadeRenderer(floor_plan, pixels_per_meter=ppm)
         self._input_source = ArcadeInputSource(pixels_per_meter=ppm)
         self._input_source.register(self)
+        self._viewport = Viewport(ppm, 0.0, 0.0)
 
         logger.info(
             "EvacWindow opened: %d×%d px at %.2f px/m (%.1f×%.1f m).",
@@ -363,14 +373,48 @@ class EvacWindow(arcade.Window):
         self._current_source = None
         self._input_source = ArcadeInputSource(pixels_per_meter=self._ppm)
         self._input_source.register(self)
+        # The new source starts at the startup scale; re-apply the current one.
+        self._apply_viewport()
         self._sim_state = _SimState.PAUSED_INITIAL
         logger.info(
             "EvacWindow: simulation reset from scenario=%r.", self._scenario_name
         )
 
+    def _apply_viewport(self) -> None:
+        """Push the current viewport to the renderer and input source."""
+        vp = self._viewport
+        fp = self._floor_plan
+        self._ppm = vp.ppm
+        self._renderer.set_viewport(vp.ppm, vp.ox, vp.oy)
+        self._input_source.set_viewport(vp, fp.width_m, fp.height_m)
+
     # ------------------------------------------------------------------
     # Arcade callbacks
     # ------------------------------------------------------------------
+
+    def on_resize(self, width: int, height: int) -> Literal[True] | None:
+        """Refit the room to the new window size (presentation only).
+
+        Uses a uniform scale so agents stay round and the room keeps its
+        proportions; spare space becomes background bars. Simulation state
+        is never touched.
+
+        Args:
+            width: New window width in pixels.
+            height: New window height in pixels.
+
+        Returns:
+            Whatever the base class returns.
+        """
+        result = super().on_resize(width, height)
+        if not hasattr(self, "_input_source"):
+            return result
+        fp = self._floor_plan
+        self._viewport = fit_viewport(
+            fp.width_m, fp.height_m, float(width), float(height)
+        )
+        self._apply_viewport()
+        return result
 
     def on_key_press(self, symbol: int, modifiers: int) -> None:
         """Handle spacebar to start, pause, continue, or reset the simulation.

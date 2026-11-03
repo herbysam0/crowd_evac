@@ -23,6 +23,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from crowd_evac.adapters.render.viewport import Viewport
 from crowd_evac.domain.constants import PIXELS_PER_METER
 from crowd_evac.ports.input_source import (
     InputEvent,
@@ -75,7 +76,37 @@ class ArcadeInputSource:
     ) -> None:
         self.pixels_per_meter: float = pixels_per_meter
         self._y_offset_px: float = y_offset_px
+        self._viewport = Viewport(pixels_per_meter, 0.0, y_offset_px)
+        # Set by set_viewport; until then only the panel strip is rejected.
+        self._room_m: tuple[float, float] | None = None
         self._queue: list[InputEvent] = []
+
+    def set_viewport(
+        self, viewport: Viewport, room_w: float, room_h: float
+    ) -> None:
+        """Adopt a new pixel mapping after a window resize.
+
+        Args:
+            viewport: Current world-to-pixel mapping, including x/y offsets.
+            room_w: Room width in metres; presses right of it are ignored.
+            room_h: Room height in metres; presses above it are ignored.
+        """
+        self._viewport = viewport
+        self.pixels_per_meter = viewport.ppm
+        self._y_offset_px = viewport.oy
+        self._room_m = (room_w, room_h)
+
+    def _to_world(self, x: float, y: float) -> tuple[float, float] | None:
+        """Convert pixels to metres, or None when outside the room."""
+        if y < self._y_offset_px:
+            return None
+        pos_m = self._viewport.to_world(x, y)
+        if self._room_m is not None and not (
+            0.0 <= pos_m[0] <= self._room_m[0]
+            and 0.0 <= pos_m[1] <= self._room_m[1]
+        ):
+            return None
+        return pos_m
 
     # ------------------------------------------------------------------
     # Event handlers — called from arcade window callbacks
@@ -101,13 +132,10 @@ class ArcadeInputSource:
         """
         if button != MOUSE_BUTTON_LEFT:
             return
-        # Ignore clicks inside the control panel area below the simulation viewport
-        if y < self._y_offset_px:
+        # Panel strip and letterbox bars are not part of the room.
+        pos_m = self._to_world(x, y)
+        if pos_m is None:
             return
-        pos_m = (
-            x / self.pixels_per_meter,
-            (y - self._y_offset_px) / self.pixels_per_meter,
-        )
         self._queue.append(PlacePanicSourceEvent(pos_m=pos_m))
         logger.info(
             "input: place fire %.4f %.4f  # add_panic_source fire %.4f %.4f",
@@ -141,13 +169,9 @@ class ArcadeInputSource:
         """
         if not (buttons & MOUSE_BUTTON_LEFT):
             return
-        # Ignore drags that originate in the control panel area
-        if y < self._y_offset_px:
+        pos_m = self._to_world(x, y)
+        if pos_m is None:
             return
-        pos_m = (
-            x / self.pixels_per_meter,
-            (y - self._y_offset_px) / self.pixels_per_meter,
-        )
         self._queue.append(MovePanicSourceEvent(pos_m=pos_m))
         logger.info(
             "input: move fire %.4f %.4f  # move_panic_source fire %.4f %.4f",

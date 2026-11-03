@@ -32,18 +32,18 @@ from crowd_evac.adapters.render.designer_style import (
     TEXT_COLOR,
 )
 from crowd_evac.adapters.render.designer_view import (
+    CANVAS_MARGIN_PX,
     MIN_WINDOW_H,
     MIN_WINDOW_W,
     TOOL_HINTS,
-    Viewport,
     ALERT_BG_COLOR,
     NOTICE_BG_COLOR,
     draw_alert,
     draw_overlays,
     draw_room,
-    fit_viewport,
     fit_window_size,
 )
+from crowd_evac.adapters.render.viewport import Viewport, fit_viewport
 from crowd_evac.designer.controller import DesignController, Tool
 
 logger = logging.getLogger(__name__)
@@ -140,7 +140,11 @@ class DesignerWindow(arcade.Window):
         """Compute the viewport for the current room size."""
         room = self.ctl.model.layout.room
         return fit_viewport(
-            room.width_m, room.height_m, self._canvas_w, self.height
+            room.width_m,
+            room.height_m,
+            self._canvas_w,
+            self.height,
+            margin_px=CANVAS_MARGIN_PX,
         )
 
     def _on_save(self) -> None:

@@ -84,6 +84,16 @@ EXIT_COLOR: RGBA255 = (55, 190, 75, 220)
 PANIC_SOURCE_COLOR: RGBA255 = (235, 110, 25, 100)
 """Panic source base colour (orange); alpha is scaled by source intensity."""
 
+AGENT_SPRITE_TEXTURE_RADIUS_PX: int = 16
+"""Fixed radius of the shared agent texture; ``sprite.scale`` does the sizing.
+
+Keeping the texture fixed means a window resize never rebuilds the agent
+sprite list, and avoids rounding the radius to whole pixels.
+"""
+
+MIN_SYMBOL_FONT_PX: int = 1
+"""Smallest hazard-symbol font size, so tiny windows never request size 0."""
+
 # ---------------------------------------------------------------------------
 # Emergency symbol configuration
 # ---------------------------------------------------------------------------
@@ -284,6 +294,8 @@ class ArcadeRenderer:
         y_offset_px: Vertical offset in pixels applied to all drawn geometry
             and agents.  Use this when the window reserves space at the bottom
             (e.g. a control panel) so the simulation viewport starts above y=0.
+        x_offset_px: Horizontal offset in pixels applied to every layer; used
+            to centre the room when the window is wider than the room.
 
     Attributes:
         floor_plan: The :class:`~crowd_evac.domain.floor_plan.FloorPlan`
@@ -299,7 +311,10 @@ class ArcadeRenderer:
         background_image: str | None = None,
         headless: bool = False,
         y_offset_px: float = 0.0,
+        x_offset_px: float = 0.0,
     ) -> None:
+        if pixels_per_meter <= 0.0:
+            raise ValueError("pixels_per_meter must be positive")
         self.floor_plan = floor_plan
         self._ppm = pixels_per_meter
         self._agent_radius_m = agent_radius_m
@@ -307,6 +322,9 @@ class ArcadeRenderer:
         self._background_image = background_image
         self._headless = headless
         self._y_offset_px = y_offset_px
+        self._x_offset_px = x_offset_px
+        # ppm at which the background image was loaded (its native scale).
+        self._bg_base_ppm = pixels_per_meter
 
         self._agent_sprites: arcade.SpriteList[arcade.SpriteCircle] | None = None
         # Background image sprite is held in a SpriteList so arcade 3.x
@@ -330,6 +348,38 @@ class ArcadeRenderer:
             y_offset_px,
         )
 
+    def set_viewport(
+        self, ppm: float, x_offset_px: float, y_offset_px: float
+    ) -> None:
+        """Adopt a new pixel mapping after a window resize.
+
+        Presentation only: simulation state is never touched. Agent sprites
+        are kept and rescaled on the next draw.
+
+        Args:
+            ppm: New pixels per metre. Must be positive.
+            x_offset_px: Horizontal pixel offset of the room origin.
+            y_offset_px: Vertical pixel offset of the room origin.
+
+        Raises:
+            ValueError: If ``ppm`` is not positive.
+        """
+        if ppm <= 0.0:
+            raise ValueError("ppm must be positive")
+        self._ppm = ppm
+        self._x_offset_px = x_offset_px
+        self._y_offset_px = y_offset_px
+        self._agent_radius_px = int(round(self._agent_radius_m * ppm))
+        self._place_background()
+
+    def _place_background(self) -> None:
+        """Centre and scale the background image on the room."""
+        fp = self.floor_plan
+        for bg in self._background_list:
+            bg.center_x = self._x_offset_px + fp.width_m * self._ppm / 2.0
+            bg.center_y = self._y_offset_px + fp.height_m * self._ppm / 2.0
+            bg.scale = self._ppm / self._bg_base_ppm
+
     def _init_gl(self) -> None:
         """Initialise GL resources; requires an active arcade GL context.
 
@@ -341,13 +391,10 @@ class ArcadeRenderer:
         self._agent_sprites = arcade.SpriteList()
 
         if self._background_image is not None:
-            cx = self.floor_plan.width_m * self._ppm / 2.0
-            cy = self.floor_plan.height_m * self._ppm / 2.0
             try:
-                bg_sprite = arcade.Sprite(
-                    self._background_image, center_x=cx, center_y=cy
-                )
+                bg_sprite = arcade.Sprite(self._background_image)
                 self._background_list.append(bg_sprite)
+                self._place_background()
             except Exception:
                 logger.warning(
                     "Background image '%s' could not be loaded; skipping.",
@@ -405,17 +452,24 @@ class ArcadeRenderer:
         """Fill the room bounding box with the floor background colour."""
         fp = self.floor_plan
         ppm = self._ppm
-        _draw_filled_rect(0.0, self._y_offset_px, fp.width_m * ppm, fp.height_m * ppm, FLOOR_COLOR)
+        _draw_filled_rect(
+            self._x_offset_px,
+            self._y_offset_px,
+            fp.width_m * ppm,
+            fp.height_m * ppm,
+            FLOOR_COLOR,
+        )
 
     def _draw_geometry(self) -> None:
         """Draw walls, interior obstacles, and exit-opening rectangles."""
         fp = self.floor_plan
         ppm = self._ppm
         y_off = self._y_offset_px
+        x_off = self._x_offset_px
 
         for wall in fp.walls:
             _draw_filled_rect(
-                wall.x * ppm,
+                wall.x * ppm + x_off,
                 wall.y * ppm + y_off,
                 wall.width * ppm,
                 wall.height * ppm,
@@ -424,7 +478,7 @@ class ArcadeRenderer:
 
         for obs in fp.obstacles:
             _draw_filled_rect(
-                obs.x * ppm,
+                obs.x * ppm + x_off,
                 obs.y * ppm + y_off,
                 obs.width * ppm,
                 obs.height * ppm,
@@ -436,25 +490,25 @@ class ArcadeRenderer:
             depth = EXIT_DEPTH_M
             if exit_.side == ExitSide.NORTH:
                 # Bottom boundary: rect flush against y=0 (outer face)
-                x0 = (exit_.x - half) * ppm
+                x0 = (exit_.x - half) * ppm + x_off
                 y0 = y_off
                 w = exit_.width_m * ppm
                 h = depth * ppm
             elif exit_.side == ExitSide.SOUTH:
                 # Top boundary: rect flush against y=height_m (outer face)
-                x0 = (exit_.x - half) * ppm
+                x0 = (exit_.x - half) * ppm + x_off
                 y0 = (fp.height_m - depth) * ppm + y_off
                 w = exit_.width_m * ppm
                 h = depth * ppm
             elif exit_.side == ExitSide.WEST:
                 # Left boundary: rect flush against x=0 (outer face)
-                x0 = 0.0
+                x0 = x_off
                 y0 = (exit_.y - half) * ppm + y_off
                 w = depth * ppm
                 h = exit_.width_m * ppm
             else:
                 # EAST — right boundary: rect flush against x=width_m (outer face)
-                x0 = (fp.width_m - depth) * ppm
+                x0 = (fp.width_m - depth) * ppm + x_off
                 y0 = (exit_.y - half) * ppm + y_off
                 w = depth * ppm
                 h = exit_.width_m * ppm
@@ -481,6 +535,7 @@ class ArcadeRenderer:
         """
         ppm = self._ppm
         y_off = self._y_offset_px
+        x_off = self._x_offset_px
         r_base, g_base, b_base, _ = PANIC_SOURCE_COLOR
         for src in sources:
             if not src.is_active:
@@ -488,7 +543,7 @@ class ArcadeRenderer:
             intensity = max(0.0, min(1.0, src.intensity))
             alpha = int(PANIC_SOURCE_COLOR[3] * intensity)
             color: RGBA255 = (r_base, g_base, b_base, alpha)
-            cx_px = src.x * ppm
+            cx_px = src.x * ppm + x_off
             cy_px = src.y * ppm + y_off
             arcade.draw_circle_filled(
                 cx_px,
@@ -499,7 +554,7 @@ class ArcadeRenderer:
             symbol = _SYMBOL_CHAR.get(src.source_type)
             if symbol is not None:
                 size_m = _SYMBOL_SIZE_M.get(src.source_type, 1.0)
-                font_size_px = int(size_m * ppm)
+                font_size_px = max(MIN_SYMBOL_FONT_PX, int(size_m * ppm))
                 arcade.draw_text(
                     symbol,
                     cx_px,
@@ -531,7 +586,9 @@ class ArcadeRenderer:
             self._agent_sprites = arcade.SpriteList()
             for _ in range(n_total):
                 self._agent_sprites.append(
-                    arcade.SpriteCircle(self._agent_radius_px, CALM_COLOR)
+                    arcade.SpriteCircle(
+                        AGENT_SPRITE_TEXTURE_RADIUS_PX, CALM_COLOR
+                    )
                 )
 
         positions = snapshot.positions
@@ -539,12 +596,17 @@ class ArcadeRenderer:
         alive = snapshot.alive
         ppm = self._ppm
         y_off = self._y_offset_px
+        x_off = self._x_offset_px
+        sprite_scale = (
+            self._agent_radius_m * ppm / AGENT_SPRITE_TEXTURE_RADIUS_PX
+        )
 
         for i, sprite in enumerate(self._agent_sprites):
             is_alive = bool(alive[i])
             sprite.visible = is_alive
             if is_alive:
-                sprite.center_x = float(positions[i, 0]) * ppm
+                sprite.scale = sprite_scale
+                sprite.center_x = float(positions[i, 0]) * ppm + x_off
                 sprite.center_y = float(positions[i, 1]) * ppm + y_off
                 p = max(0.0, min(1.0, float(panics[i])))
                 sprite.color = _interpolate_color(CALM_COLOR, PANIC_COLOR, p)
