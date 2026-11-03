@@ -15,7 +15,7 @@ callers pass the ``scenario_ref`` field to
 
 All bundled scenario names resolve via
 :func:`~crowd_evac.adapters.io.scenario_loader.load_bundled_scenario`; see
-the ``assets/scenarios/`` package directory for the JSON files.
+the repo-root ``assets/scenarios/`` directory for the JSON files.
 """
 from __future__ import annotations
 
