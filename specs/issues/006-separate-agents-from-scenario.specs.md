@@ -201,15 +201,15 @@ Agent runs named test files only. Full-suite runs belong to the user:
 - `adapters/io/scenario_catalog.py`: room listing, unchanged.
 
 ## Success Criteria
-- [ ] All bundled JSONs hold only `schema_version` (`"2.0"`), `name`, `floor_plan`.
-- [ ] `hazard_lecture_hall.json` gone; `lecture_hall_small` renamed, geometry unchanged.
-- [ ] Bare run uses 3 agents, seed 42; every README command matches its old count and seed.
-- [ ] `--hazard` reproduces the old hazard in the window; reset replays it.
-- [ ] Calibration and hazard validation results match the baseline.
-- [ ] `"1.0"` error names the migration script; script converts old files.
-- [ ] Designer saves room-only files.
+- [x] All bundled JSONs hold only `schema_version` (`"2.0"`), `name`, `floor_plan`.
+- [x] `hazard_lecture_hall.json` gone; `lecture_hall_small` renamed, geometry unchanged.
+- [x] Bare run uses 3 agents, seed 42; every README command matches its old count and seed.
+- [x] `--hazard` reproduces the old hazard in the window; reset replays it.
+- [x] Calibration and hazard validation results match the baseline.
+- [x] `"1.0"` error names the migration script; script converts old files.
+- [x] Designer saves room-only files.
 - [ ] Targeted tests pass; user-run full suite, mypy and flake8 pass; coverage at least 80%.
-- [ ] Version is `1.0.0`.
+- [x] Version is `1.0.0`.
 
 ## Out of Scope
 - Population files, spawn zones, per-agent traits.
