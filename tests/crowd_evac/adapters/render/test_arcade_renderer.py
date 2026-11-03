@@ -337,6 +337,35 @@ class TestArcadeRendererHeadless:
 # ---------------------------------------------------------------------------
 
 
+class TestSetViewportHeadless:
+    """set_viewport on a headless renderer (issue #7)."""
+
+    def test_updates_scale_and_offsets(self, floor_plan: FloorPlan) -> None:
+        """Verify ppm and both offsets are adopted."""
+        renderer = ArcadeRenderer(floor_plan, headless=True)
+        renderer.set_viewport(55.0, 12.0, 7.0)
+        assert renderer._ppm == 55.0  # noqa: SLF001
+        assert renderer._x_offset_px == 12.0  # noqa: SLF001
+        assert renderer._y_offset_px == 7.0  # noqa: SLF001
+
+    @pytest.mark.parametrize("ppm", [0.0, -1.0])
+    def test_rejects_non_positive_ppm(
+        self, floor_plan: FloorPlan, ppm: float
+    ) -> None:
+        """Verify zero or negative scale raises ValueError."""
+        renderer = ArcadeRenderer(floor_plan, headless=True)
+        with pytest.raises(ValueError, match="ppm"):
+            renderer.set_viewport(ppm, 0.0, 0.0)
+
+    def test_render_after_set_viewport_does_not_raise(
+        self, floor_plan: FloorPlan, make_snapshot: MakeSnapshot
+    ) -> None:
+        """Verify rendering still works after a viewport change."""
+        renderer = ArcadeRenderer(floor_plan, headless=True)
+        renderer.set_viewport(10.0, 3.0, 4.0)
+        renderer.render(make_snapshot())
+
+
 class TestModuleImportSafety:
     """Verify the module is import-safe without a GL context."""
 
@@ -468,3 +497,32 @@ class TestArcadeRendererGL:
         finally:
             window.close()
         assert window._done  # noqa: SLF001
+
+
+@pytest.mark.render
+class TestArcadeRendererResizeGL:
+    """Agent sprites survive and follow a viewport change (needs display)."""
+
+    def test_sprites_keep_identity_and_follow_viewport(
+        self, floor_plan: FloorPlan, make_snapshot: MakeSnapshot
+    ) -> None:
+        """Verify resize rescales and repositions without rebuilding sprites."""
+        import arcade
+
+        window = arcade.Window(400, 400, "resize GL test")
+        try:
+            renderer = ArcadeRenderer(floor_plan, pixels_per_meter=40.0)
+            snap = make_snapshot(n_agents=3)
+            renderer.render(snap)
+            sprites = renderer._agent_sprites  # noqa: SLF001
+            assert sprites is not None
+            first = sprites[0]
+            renderer.set_viewport(20.0, 30.0, 5.0)
+            renderer.render(snap)
+            assert renderer._agent_sprites is sprites  # noqa: SLF001
+            assert sprites[0] is first
+            assert first.center_x == pytest.approx(0.5 * 20.0 + 30.0)
+            assert first.center_y == pytest.approx(1.0 * 20.0 + 5.0)
+            assert first.width == pytest.approx(2 * AGENT_RADIUS * 20.0)
+        finally:
+            window.close()

@@ -270,6 +270,7 @@ class TestEvacWindowPpmConsistency:
         )
         mocker.patch("crowd_evac.application.cli.ArcadeRenderer")
         mocker.patch("arcade.Window.__init__", return_value=None)
+        mocker.patch("arcade.Window.set_minimum_size")
 
     def test_input_source_ppm_matches_renderer_ppm(
         self, mocker: MockerFixture
@@ -316,6 +317,98 @@ class TestEvacWindowPpmConsistency:
         assert world_y * scaled_ppm == pytest.approx(click_y_px)
 
 
+class TestEvacWindowResize(TestEvacWindowPpmConsistency):
+    """Resize refits renderer and input together (issue #7), headless."""
+
+    def _window(self, mocker: MockerFixture) -> EvacWindow:
+        """Build a headless window at ppm 25 on the Lecture Hall."""
+        self._patch_evac_window(mocker, 25.0)
+        mocker.patch("arcade.Window.on_resize", return_value=None)
+        sim, floor_plan = build_simulation_from_scenario()
+        window = EvacWindow(sim, floor_plan)
+        self.floor_plan = floor_plan
+        return window
+
+    def test_on_resize_pushes_same_viewport_to_renderer_and_input(
+        self, mocker: MockerFixture
+    ) -> None:
+        """Verify both adapters get the fitted ppm and offsets."""
+        window = self._window(mocker)
+        fp = self.floor_plan
+        window.on_resize(int(fp.width_m * 30) + 200, int(fp.height_m * 30))
+        vp = window._viewport
+        window._renderer.set_viewport.assert_called_with(  # type: ignore[attr-defined]
+            vp.ppm, vp.ox, vp.oy
+        )
+        assert vp.ppm == pytest.approx(30.0)
+        assert vp.ox == pytest.approx(100.0)
+        assert window._input_source.pixels_per_meter == pytest.approx(30.0)
+
+    def test_click_maps_correctly_after_resize_then_reset(
+        self, mocker: MockerFixture
+    ) -> None:
+        """Verify the rebuilt input source keeps the resized mapping."""
+        from crowd_evac.adapters.render.arcade_input import MOUSE_BUTTON_LEFT
+
+        window = self._window(mocker)
+        fp = self.floor_plan
+        window.on_resize(int(fp.width_m * 30) + 200, int(fp.height_m * 30))
+        window._reset()
+        window._input_source.on_mouse_press(
+            100.0 + 3.0 * 30, 2.0 * 30, MOUSE_BUTTON_LEFT, 0
+        )
+        (event,) = window._input_source.poll()
+        assert event.pos_m == pytest.approx((3.0, 2.0))  # type: ignore[attr-defined]
+
+    def test_resize_does_not_change_sim_state(
+        self, mocker: MockerFixture
+    ) -> None:
+        """Verify resize leaves tick and state machine untouched."""
+        window = self._window(mocker)
+        state, tick = window._sim_state, window._sim.tick
+        window.on_resize(500, 300)
+        assert (window._sim_state, window._sim.tick) == (state, tick)
+
+    @pytest.mark.parametrize(
+        "state",
+        [_SimState.PAUSED_INITIAL, _SimState.RUNNING,
+         _SimState.PAUSED_MID, _SimState.COMPLETE],
+    )
+    def test_resize_in_every_state_keeps_state(
+        self, mocker: MockerFixture, state: _SimState
+    ) -> None:
+        """Verify resizing never moves the state machine."""
+        window = self._window(mocker)
+        window._sim_state = state
+        window.on_resize(640, 480)
+        assert window._sim_state == state
+
+    def test_resizes_during_run_do_not_change_agent_positions(
+        self, mocker: MockerFixture
+    ) -> None:
+        """Verify same seed gives identical positions with and without resizes."""
+        import numpy as np
+
+        window = self._window(mocker)
+        reference, _ = build_simulation_from_scenario()
+        for tick in range(20):
+            if tick % 5 == 0:
+                window.on_resize(300 + 40 * tick, 400 - 10 * tick)
+            window._sim.step()
+            reference.step()
+        np.testing.assert_array_equal(
+            window._sim.snapshot().positions, reference.snapshot().positions
+        )
+
+    def test_on_resize_before_adapters_exist_is_tolerated(
+        self, mocker: MockerFixture
+    ) -> None:
+        """Verify an on_resize during super().__init__ does not raise."""
+        mocker.patch("arcade.Window.on_resize", return_value=None)
+        window = EvacWindow.__new__(EvacWindow)
+        window.on_resize(100, 100)
+
+
 class TestSimStateMachine:
     """Tests for the :class:`_SimState` enum and :data:`_STATE_HINT` mapping."""
 
@@ -347,3 +440,24 @@ class TestSimStateMachine:
         """Every state except RUNNING has a hint entry."""
         non_running = {s for s in _SimState if s != _SimState.RUNNING}
         assert non_running == set(_STATE_HINT.keys())
+
+
+@pytest.mark.render
+class TestEvacWindowResizeGL:
+    """Real-window resize smoke test (needs a display)."""
+
+    def test_resize_keeps_adapters_in_sync_and_draws(self) -> None:
+        """Verify renderer and input share one viewport after a resize."""
+        sim, floor_plan = build_simulation_from_scenario()
+        window = EvacWindow(sim, floor_plan)
+        try:
+            window.on_resize(900, 500)
+            vp = window._viewport
+            assert window._renderer._ppm == pytest.approx(vp.ppm)
+            assert window._renderer._x_offset_px == pytest.approx(vp.ox)
+            assert window._input_source.pixels_per_meter == pytest.approx(
+                vp.ppm
+            )
+            window.on_draw()
+        finally:
+            window.close()

@@ -7,7 +7,6 @@ import pytest
 from crowd_evac.adapters.render.designer_view import (
     band_label,
     band_preview_rect,
-    fit_viewport,
     fit_window_size,
     selection_rect,
 )
@@ -16,28 +15,6 @@ from crowd_evac.designer.controller import DesignController, RubberBand
 from crowd_evac.designer.placement import Selection
 
 from .designer_helpers import ready_controller
-
-
-class TestViewport:
-    """Metre/pixel mapping."""
-
-    def test_round_trip(self) -> None:
-        """Verify to_px / to_world are inverses."""
-        vp = fit_viewport(15.0, 10.0, 980.0, 760.0)
-        px = vp.to_px(3.2, 4.1)
-        assert vp.to_world(*px) == pytest.approx((3.2, 4.1))
-
-    def test_room_fits_inside_canvas_with_margin(self) -> None:
-        """Verify the scaled room stays within the canvas."""
-        vp = fit_viewport(50.0, 30.0, 980.0, 760.0)
-        left, right, bottom, top = vp.lrbt((0.0, 0.0, 50.0, 30.0))
-        assert 0 < left and right < 980 and 0 < bottom and top < 760
-
-    def test_lrbt_scales_rect(self) -> None:
-        """Verify rectangle conversion uses ppm."""
-        vp = fit_viewport(10.0, 10.0, 500.0, 500.0)
-        left, right, _, _ = vp.lrbt((1.0, 1.0, 2.0, 2.0))
-        assert right - left == pytest.approx(2.0 * vp.ppm)
 
 
 class TestLabels:

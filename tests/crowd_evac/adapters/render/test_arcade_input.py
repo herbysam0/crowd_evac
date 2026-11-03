@@ -29,6 +29,7 @@ from crowd_evac.adapters.render.arcade_input import (
     MOUSE_BUTTON_LEFT,
     ArcadeInputSource,
 )
+from crowd_evac.adapters.render.viewport import Viewport
 from crowd_evac.application.injection import (
     add_panic_source,
     process_input_events,
@@ -405,3 +406,73 @@ class TestProcessInputEvents:
         result = process_input_events(sim, [_UnknownEvent()])
         assert result is None
         assert len(sim.panic_field.sources) == 0
+
+
+# ---------------------------------------------------------------------------
+# set_viewport (issue #7): letterboxed, resizable window
+# ---------------------------------------------------------------------------
+
+_ROOM_W = 10.0
+_ROOM_H = 5.0
+
+
+def _letterboxed_source() -> ArcadeInputSource:
+    """Return a source with ppm 20, 100 px left bar and 10 px bottom bar."""
+    src = ArcadeInputSource()
+    src.set_viewport(Viewport(20.0, 100.0, 10.0), _ROOM_W, _ROOM_H)
+    return src
+
+
+class TestSetViewport:
+    """Mouse mapping after a resize."""
+
+    def test_press_maps_through_both_offsets(self) -> None:
+        """Verify x and y offsets are removed before scaling."""
+        src = _letterboxed_source()
+        src.on_mouse_press(100.0 + 3.0 * 20.0, 10.0 + 2.0 * 20.0, 1, 0)
+        (event,) = src.poll()
+        assert event.pos_m == pytest.approx((3.0, 2.0))  # type: ignore[attr-defined]
+
+    def test_set_viewport_replaces_previous_mapping(self) -> None:
+        """Verify a second set_viewport wins over the first."""
+        src = _letterboxed_source()
+        src.set_viewport(Viewport(10.0, 0.0, 0.0), _ROOM_W, _ROOM_H)
+        src.on_mouse_press(50.0, 20.0, 1, 0)
+        (event,) = src.poll()
+        assert event.pos_m == pytest.approx((5.0, 2.0))  # type: ignore[attr-defined]
+
+    @pytest.mark.parametrize(
+        "x, y",
+        [
+            (50.0, 50.0),
+            (100.0 + 10.0 * 20.0 + 1.0, 50.0),
+            (150.0, 5.0),
+            (150.0, 10.0 + 5.0 * 20.0 + 1.0),
+        ],
+        ids=["left-bar", "right-bar", "below", "above"],
+    )
+    def test_press_outside_room_is_ignored(self, x: float, y: float) -> None:
+        """Verify presses in the bars queue nothing."""
+        src = _letterboxed_source()
+        src.on_mouse_press(x, y, 1, 0)
+        assert src.poll() == []
+
+    def test_drag_outside_room_is_ignored(self) -> None:
+        """Verify drags in the bars queue nothing."""
+        src = _letterboxed_source()
+        src.on_mouse_drag(50.0, 50.0, 0, 0, 1, 0)
+        assert src.poll() == []
+
+    @pytest.mark.parametrize(
+        "x, y, expected",
+        [(100.0, 10.0, (0.0, 0.0)), (300.0, 110.0, (_ROOM_W, _ROOM_H))],
+        ids=["origin", "far-corner"],
+    )
+    def test_room_edges_are_accepted(
+        self, x: float, y: float, expected: tuple[float, float]
+    ) -> None:
+        """Verify boundary points count as inside the room."""
+        src = _letterboxed_source()
+        src.on_mouse_drag(x, y, 0, 0, 1, 0)
+        (event,) = src.poll()
+        assert event.pos_m == pytest.approx(expected)  # type: ignore[attr-defined]

@@ -143,6 +143,7 @@ docs/              # Documentation (PRD, plans)
 - **Controls:**
   - **Click and drag** to place/move a panic source (fire, smoke, etc.)
   - **Spacebar** to start, pause, or reset the simulation
+  - **Resize or maximize** the window at any time; the room scales to fit, keeps its proportions, and is centred (clicks in the side bars are ignored)
 - **Watch:** The crowd flees the panic source, re-routes around obstacles, and evacuates through exits
 - **Goal:** Observe emergent crowd behavior and test evacuation effectiveness under a fixed-step seeded simulation
 
