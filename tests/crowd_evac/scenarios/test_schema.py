@@ -6,12 +6,11 @@ each TypedDict can be instantiated with the documented fields.
 from __future__ import annotations
 
 from crowd_evac.scenarios.schema import (
-    AgentConfigData,
+    EmergencyEventData,
     ExitData,
     FloorPlanData,
     ObstacleData,
     ScenarioData,
-    SimConfigData,
     WallData,
 )
 
@@ -107,10 +106,10 @@ class TestFloorPlanData:
 class TestScenarioData:
     """Test ScenarioData root TypedDict."""
 
-    def test_scenario_data_has_all_sections(self) -> None:
-        """Verify ScenarioData can be constructed with all sections."""
+    def test_scenario_data_holds_room_only(self) -> None:
+        """Verify ScenarioData is version, name and floor plan, nothing else."""
         scenario: ScenarioData = {
-            "schema_version": "1.0",
+            "schema_version": "2.0",
             "name": "test",
             "floor_plan": {
                 "width_m": 5.0,
@@ -120,16 +119,24 @@ class TestScenarioData:
                 "exits": [{"x": 2.5, "y": 0.0, "width_m": 1.0,
                             "side": "south", "capacity_per_second": 2}],
             },
-            "agents": {"count": 10, "spawn_seed": 0},
-            "simulation": {"dt": 0.05, "max_ticks": 1000},
         }
-        assert scenario["schema_version"] == "1.0"
-        assert scenario["agents"]["count"] == 10
+        assert scenario["schema_version"] == "2.0"
+        assert set(scenario) == {"schema_version", "name", "floor_plan"}
 
-    def test_sim_config_is_fully_optional(self) -> None:
-        """Verify simulation section accepts an empty dict (all fields optional)."""
-        sim: SimConfigData = {}
-        assert "dt" not in sim
+    def test_agent_and_sim_types_are_gone(self) -> None:
+        """Verify the removed run-setting types no longer exist."""
+        from crowd_evac.scenarios import schema
+
+        assert not hasattr(schema, "AgentConfigData")
+        assert not hasattr(schema, "SimConfigData")
+
+    def test_emergency_event_optional_fields(self) -> None:
+        """Verify EmergencyEventData needs only tick, type and pos."""
+        event: EmergencyEventData = {
+            "tick": 100, "type": "place_panic_source", "pos": [25.0, 3.5],
+        }
+        assert event["pos"] == [25.0, 3.5]
+        assert "intensity" not in event
 
     def test_obstacle_data_mirrors_wall_data(self) -> None:
         """Verify ObstacleData has the same required fields as WallData."""

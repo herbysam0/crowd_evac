@@ -9,7 +9,7 @@ Why separate from test_suite.py
 On Windows the ``spawn`` start method costs ~0.5 s per worker process.
 At short tick counts (≤ 50 ticks, ~50 ms/task) spawn overhead dominates
 and ``parallel < serial`` is unreliable.  At 1000 ticks (~1–5 s/task on
-lecture_hall_small) each task's simulation cost exceeds the spawn cost,
+lecture_hall_no_aisle) each task's simulation cost exceeds the spawn cost,
 so the parallel path genuinely wins.
 
 The test is marked ``perf`` so it is skipped in the default pytest run
@@ -54,7 +54,7 @@ _SEEDS: list[int] = [42, 43, 44]
 def test_parallel_batch_faster_than_serial() -> None:
     """Parallel evaluate_batch beats serial for the first suite scenario at 1000 ticks.
 
-    Uses 2 candidates × 3 seeds = 6 tasks on lecture_hall_small (30 agents).
+    Uses 2 candidates × 3 seeds = 6 tasks on lecture_hall_no_aisle (30 agents).
     At 1000 ticks the per-task wall-clock cost comfortably exceeds the Windows
     spawn overhead, so ``parallel_s < serial_s`` is a reliable assertion.
 
@@ -68,6 +68,7 @@ def test_parallel_batch_faster_than_serial() -> None:
         pytest.skip("single-core machine — no parallel speedup possible")
 
     scenario_ref = search_suite()[0].scenario_ref
+    agent_count = search_suite()[0].agent_count
     n_tasks = len(_CANDIDATES) * len(_SEEDS)
 
     t0 = time.monotonic()
@@ -77,6 +78,7 @@ def test_parallel_batch_faster_than_serial() -> None:
         _SEEDS,
         max_ticks=_TICK_CAP,
         max_workers=1,
+        agent_count=agent_count,
     )
     serial_s = time.monotonic() - t0
 
@@ -87,6 +89,7 @@ def test_parallel_batch_faster_than_serial() -> None:
         _SEEDS,
         max_ticks=_TICK_CAP,
         max_workers=n_cores,
+        agent_count=agent_count,
     )
     parallel_s = time.monotonic() - t1
 

@@ -11,7 +11,6 @@ from __future__ import annotations
 from crowd_evac.designer.geometry import Rect
 from crowd_evac.designer.layout import (
     Doorway,
-    Extras,
     Layout,
     Obstacle,
     RoomSettings,
@@ -36,7 +35,7 @@ def layout_from_scenario(plan: FloorPlan, data: ScenarioData) -> Layout:
 
     Args:
         plan: Floor plan returned by the scenario loader.
-        data: Scenario data (name, agents, simulation, events).
+        data: Scenario data (schema version, name, floor plan).
 
     Returns:
         A layout equivalent to the scenario's geometry.
@@ -52,13 +51,13 @@ def layout_from_scenario(plan: FloorPlan, data: ScenarioData) -> Layout:
         base + i: Obstacle(base + i, o.x, o.y, o.width, o.height)
         for i, o in enumerate(plan.obstacles, start=1)
     }
-    bare = Layout(room, walls, {}, {}, _extras(data))
+    bare = Layout(room, walls, {}, {})
     base += len(obstacles)
     doorways = {
         base + i: _doorway(bare, base + i, e)
         for i, e in enumerate(plan.exits, start=1)
     }
-    layout = Layout(room, walls, obstacles, doorways, bare.extras)
+    layout = Layout(room, walls, obstacles, doorways)
     validate(layout)
     return layout
 
@@ -70,17 +69,6 @@ def _wall(wall_id: int, w: PlanWall) -> Wall:
         return Wall(wall_id, w.x, y, w.x + w.width, y, w.height)
     x = w.x + w.width / 2.0
     return Wall(wall_id, x, w.y, x, w.y + w.height, w.width)
-
-
-def _extras(data: ScenarioData) -> Extras:
-    """Carry settings the designer does not edit."""
-    agents = data["agents"]
-    return Extras(
-        agent_count=int(agents["count"]),
-        spawn_seed=int(agents["spawn_seed"]),
-        simulation=dict(data.get("simulation", {})),
-        events=tuple(dict(e) for e in data.get("events", [])),
-    )
 
 
 def _distance(rect: Rect, x: float, y: float) -> float:

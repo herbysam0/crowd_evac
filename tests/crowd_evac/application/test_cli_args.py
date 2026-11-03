@@ -9,6 +9,7 @@ from pytest_mock import MockerFixture
 
 from crowd_evac.application import cli
 from crowd_evac.application.cli import DEFAULT_SCENARIO, main, parse_args
+from crowd_evac.domain.constants import DEFAULT_AGENT_COUNT, DEFAULT_SPAWN_SEED
 
 
 class TestParseArgs:
@@ -23,8 +24,8 @@ class TestParseArgs:
     @pytest.mark.parametrize("flag", ["--scenario", "-s"])
     def test_scenario_flag_selects_bundled(self, flag: str) -> None:
         """Verify long and short flags select a bundled scenario."""
-        assert parse_args([flag, "lecture_hall_small"]).scenario == (
-            "lecture_hall_small"
+        assert parse_args([flag, "lecture_hall_no_aisle"]).scenario == (
+            "lecture_hall_no_aisle"
         )
 
     def test_list_flag_sets_list(self) -> None:
@@ -34,7 +35,7 @@ class TestParseArgs:
     def test_design_defaults_off(self) -> None:
         """Verify existing invocations are unchanged by the new flag."""
         assert parse_args([]).design is False
-        assert parse_args(["-s", "lecture_hall_small"]).design is False
+        assert parse_args(["-s", "lecture_hall_no_aisle"]).design is False
 
     @pytest.mark.parametrize("flag", ["--design", "-d"])
     def test_design_flag_sets_design(self, flag: str) -> None:
@@ -45,7 +46,7 @@ class TestParseArgs:
         "argv",
         [
             ["--design", "--list"],
-            ["--design", "--scenario", "lecture_hall_small"],
+            ["--design", "--scenario", "lecture_hall_no_aisle"],
         ],
         ids=["with-list", "with-scenario"],
     )
@@ -84,7 +85,9 @@ class TestMain:
         window = mocker.patch.object(cli, "EvacWindow")
         mocker.patch.object(cli.arcade, "run")
         main(["-s", "bottleneck_corridor"])
-        build.assert_called_once_with("bottleneck_corridor")
+        build.assert_called_once_with(
+            "bottleneck_corridor", DEFAULT_AGENT_COUNT, DEFAULT_SPAWN_SEED, []
+        )
         assert window.call_args.args[2] == "bottleneck_corridor"
 
 

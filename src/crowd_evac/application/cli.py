@@ -2,8 +2,9 @@
 
 Usage::
 
-    python -m crowd_evac                        # Lecture Hall default scenario
-    python -m crowd_evac --scenario NAME        # pick a bundled scenario
+    python -m crowd_evac                        # Lecture Hall, 3 agents, seed 42
+    python -m crowd_evac -s NAME --agents N --seed S   # pick room + population
+    python -m crowd_evac --hazard x=25,y=3.5,tick=100  # scripted fire (repeatable)
     python -m crowd_evac --list                 # show bundled scenario names
     crowd-evac                                  # pip-installed console script
 
@@ -14,7 +15,6 @@ testable headless.  :func:`main` takes that result, opens an
 """
 from __future__ import annotations
 
-import argparse
 import enum
 import logging
 from collections.abc import Sequence
@@ -25,22 +25,37 @@ from crowd_evac.adapters.io.scenario_catalog import list_bundled_scenarios
 from crowd_evac.adapters.io.scenario_loader import load_bundled_scenario
 from crowd_evac.adapters.render.arcade_input import ArcadeInputSource
 from crowd_evac.adapters.render.arcade_renderer import ArcadeRenderer
-from crowd_evac.application.injection import process_input_events
+from crowd_evac.application.cli_args import (
+    DEFAULT_SCENARIO,
+    build_parser,
+    parse_args,
+)
+from crowd_evac.application.hazard_args import (
+    HazardOutOfRoomError,
+    check_hazards_in_room,
+)
+from crowd_evac.application.injection import (
+    apply_due_events,
+    events_by_tick,
+    process_input_events,
+)
 from crowd_evac.application.rng import SeededRNG
 from crowd_evac.application.simulation import Simulation
 from crowd_evac.domain.agent_state import spawn
 from crowd_evac.domain.collision import CollisionMap
-from crowd_evac.domain.constants import PIXELS_PER_METER
+from crowd_evac.domain.constants import (
+    DEFAULT_AGENT_COUNT,
+    DEFAULT_SPAWN_SEED,
+    PIXELS_PER_METER,
+)
 from crowd_evac.domain.exit_model import ExitModel
 from crowd_evac.domain.floor_plan import FloorPlan
 from crowd_evac.domain.panic_field import PanicField
 from crowd_evac.domain.panic_source import PanicSource
 from crowd_evac.pathfinding.flow_field import FlowField
+from crowd_evac.scenarios.schema import EmergencyEventData
 
 logger = logging.getLogger(__name__)
-
-DEFAULT_SCENARIO: str = "lecture_hall"
-"""Bundled scenario name loaded when no user file is specified (FR-0 R0.1)."""
 
 WINDOW_TITLE: str = "Crowd Evac"
 """Title bar text for the arcade window."""
@@ -171,16 +186,23 @@ def compute_fit_ppm(
 
 def build_simulation_from_scenario(
     scenario_name: str = DEFAULT_SCENARIO,
+    agent_count: int = DEFAULT_AGENT_COUNT,
+    seed: int = DEFAULT_SPAWN_SEED,
+    events: Sequence[EmergencyEventData] = (),
 ) -> tuple[Simulation, FloorPlan]:
-    """Load a bundled scenario and construct a fully-wired Simulation.
+    """Load a bundled room and construct a fully-wired Simulation.
 
     No GL context is required; this function is safe to call headless.  The
-    returned simulation is at tick 0 with agents spawned inside the walkable
-    region using the scenario's ``spawn_seed``.
+    returned simulation is at tick 0 with ``agent_count`` agents spawned
+    inside the walkable region from ``seed``.  ``events`` are validated here
+    but fire later, by tick, in :meth:`EvacWindow.on_update`.
 
     Args:
         scenario_name: Bundled scenario name without the ``.json`` extension.
             Defaults to :data:`DEFAULT_SCENARIO` (Lecture Hall).
+        agent_count: Number of agents to spawn.
+        seed: Spawn RNG seed.
+        events: Scripted hazards to validate against the room.
 
     Returns:
         A ``(sim, floor_plan)`` tuple.  The simulation owns all domain
@@ -191,6 +213,7 @@ def build_simulation_from_scenario(
     Raises:
         MalformedScenarioError: If the bundled file is missing or malformed.
         ScenarioValidationError: If the scenario fails semantic validation.
+        HazardOutOfRoomError: If a hazard lies outside the room.
         PathfindingError: If the floor plan has no walkable exit cell.
 
     Example:
@@ -198,11 +221,10 @@ def build_simulation_from_scenario(
         >>> sim.tick
         0
     """
-    floor_plan, scenario_data = load_bundled_scenario(scenario_name)
-    seed: int = scenario_data["agents"]["spawn_seed"]
-    count: int = scenario_data["agents"]["count"]
+    floor_plan, _ = load_bundled_scenario(scenario_name)
+    check_hazards_in_room(events, floor_plan)
     rng = SeededRNG(seed)
-    state = spawn(floor_plan, count, rng.generator)
+    state = spawn(floor_plan, agent_count, rng.generator)
     flow_field = FlowField.build(floor_plan)
     panic_field = PanicField()
     exit_model = ExitModel(floor_plan)
@@ -216,10 +238,11 @@ def build_simulation_from_scenario(
         collision_map=collision_map,
     )
     logger.info(
-        "Simulation built: scenario=%r agents=%d seed=%d",
+        "Simulation built: scenario=%r agents=%d seed=%d hazards=%d",
         scenario_name,
-        count,
+        agent_count,
         seed,
+        len(events),
     )
     return sim, floor_plan
 
@@ -246,6 +269,10 @@ class EvacWindow(arcade.Window):
             (``width_m × height_m × pixels_per_meter``).
         scenario_name: Bundled scenario name used to rebuild the simulation on
             Reset.  Defaults to :data:`DEFAULT_SCENARIO`.
+        agent_count: Population to respawn on Reset.
+        seed: Spawn seed to reuse on Reset, so the run repeats exactly.
+        events: Scripted hazards fired by simulation tick; replayed after
+            Reset.
     """
 
     def __init__(
@@ -253,6 +280,9 @@ class EvacWindow(arcade.Window):
         sim: Simulation,
         floor_plan: FloorPlan,
         scenario_name: str = DEFAULT_SCENARIO,
+        agent_count: int = DEFAULT_AGENT_COUNT,
+        seed: int = DEFAULT_SPAWN_SEED,
+        events: Sequence[EmergencyEventData] = (),
     ) -> None:
         """Open a window sized to the floor plan and wire adapters.
 
@@ -260,6 +290,9 @@ class EvacWindow(arcade.Window):
             sim: Simulation to drive.
             floor_plan: Provides physical dimensions and geometry.
             scenario_name: Scenario to reload on Reset.
+            agent_count: Population to respawn on Reset.
+            seed: Spawn seed to reuse on Reset.
+            events: Scripted hazards to fire by tick.
         """
         ppm = compute_fit_ppm(floor_plan)
         width_px = int(floor_plan.width_m * ppm)
@@ -268,6 +301,10 @@ class EvacWindow(arcade.Window):
 
         self._sim = sim
         self._scenario_name = scenario_name
+        self._agent_count = agent_count
+        self._seed = seed
+        self._events = tuple(events)
+        self._schedule = events_by_tick(self._events)
         self._ppm = ppm
         self._floor_plan = floor_plan
         self._sim_state: _SimState = _SimState.PAUSED_INITIAL
@@ -314,11 +351,14 @@ class EvacWindow(arcade.Window):
         """Rebuild the simulation from the original scenario.
 
         Creates a fresh :class:`~crowd_evac.application.simulation.Simulation`
-        loaded from :attr:`_scenario_name`, clears any active panic source,
+        from :attr:`_scenario_name` with the same agent count and seed (so the
+        scripted hazards replay identically), clears any active panic source,
         re-registers the input source, and returns the state machine to
         :attr:`_SimState.PAUSED_INITIAL`.
         """
-        sim, _ = build_simulation_from_scenario(self._scenario_name)
+        sim, _ = build_simulation_from_scenario(
+            self._scenario_name, self._agent_count, self._seed, self._events
+        )
         self._sim = sim
         self._current_source = None
         self._input_source = ArcadeInputSource(pixels_per_meter=self._ppm)
@@ -360,6 +400,9 @@ class EvacWindow(arcade.Window):
             self._sim_state = _SimState.COMPLETE
             logger.info("EvacWindow: evacuation complete — state → complete.")
             return
+        # Scripted hazards fire before step() so the source is active for this
+        # tick's panic phase, matching the headless harness.
+        apply_due_events(self._sim, self._schedule)
         events = self._input_source.poll()
         self._current_source = process_input_events(
             self._sim,
@@ -403,57 +446,12 @@ class EvacWindow(arcade.Window):
             )
 
 
-def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
-    """Parse command-line arguments.
-
-    Args:
-        argv: Argument list excluding the program name; ``None`` reads
-            ``sys.argv``.
-
-    Returns:
-        Namespace with ``scenario`` (validated bundled name), ``list``
-        (bool, True when ``--list`` was given) and ``design`` (bool, True
-        when ``--design`` was given).  Exits with status 2 via argparse if
-        ``--scenario`` is not a bundled scenario, or if ``--design`` is
-        combined with ``--list`` or a non-default ``--scenario``.
-    """
-    available = list_bundled_scenarios()
-    parser = argparse.ArgumentParser(
-        prog="crowd-evac",
-        description="Run a crowd evacuation simulation.",
-    )
-    parser.add_argument(
-        "-s",
-        "--scenario",
-        default=DEFAULT_SCENARIO,
-        choices=available,
-        metavar="NAME",
-        help=f"bundled scenario to run (default: {DEFAULT_SCENARIO}); "
-        f"one of: {', '.join(available)}",
-    )
-    parser.add_argument(
-        "-l",
-        "--list",
-        action="store_true",
-        help="print bundled scenario names and exit",
-    )
-    parser.add_argument(
-        "-d",
-        "--design",
-        action="store_true",
-        help="open the room designer instead of running a scenario",
-    )
-    args = parser.parse_args(argv)
-    if args.design and (args.list or args.scenario != DEFAULT_SCENARIO):
-        parser.error("--design cannot be combined with --list or --scenario")
-    return args
-
-
 def main(argv: Sequence[str] | None = None) -> None:
     """Launch the selected scenario and enter the event loop.
 
-    Loads the bundled scenario chosen via ``--scenario`` (default Lecture
-    Hall), wires the simulation, opens :class:`EvacWindow`, and calls
+    Loads the bundled room chosen via ``--scenario`` (default Lecture Hall),
+    spawns ``--agents`` agents from ``--seed``, arms any ``--hazard`` events,
+    wires the simulation, opens :class:`EvacWindow`, and calls
     ``arcade.run()``.  With ``--list``, prints scenario names and returns
     without opening a window.  With ``--design``, opens the room designer
     (imported lazily so normal runs never load it) and returns when it is
@@ -483,6 +481,13 @@ def main(argv: Sequence[str] | None = None) -> None:
         level=logging.WARNING,
         format="%(levelname)s %(name)s: %(message)s",
     )
-    sim, floor_plan = build_simulation_from_scenario(args.scenario)
-    EvacWindow(sim, floor_plan, args.scenario)
+    try:
+        sim, floor_plan = build_simulation_from_scenario(
+            args.scenario, args.agents, args.seed, args.hazard
+        )
+    except HazardOutOfRoomError as exc:
+        build_parser().error(str(exc))
+    EvacWindow(
+        sim, floor_plan, args.scenario, args.agents, args.seed, args.hazard
+    )
     arcade.run()

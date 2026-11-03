@@ -1,14 +1,10 @@
-"""Convert a design :class:`Layout` to schema-1.0 ``ScenarioData``.
+"""Convert a design :class:`Layout` to schema-2.0 ``ScenarioData``.
 
 Follows the conventions of the bundled scenarios: ``north`` is the bottom
 wall (``y=0``), ``south`` the top wall (``y=height_m``), and an exit's
 centre sits on the inner face of its wall.
 """
 from __future__ import annotations
-
-from typing import Any, cast
-
-import numpy as np
 
 from crowd_evac.designer.geometry import Side
 from crowd_evac.designer.layout import (
@@ -18,9 +14,7 @@ from crowd_evac.designer.layout import (
     side_of_wall,
     validate,
 )
-from crowd_evac.domain.agent_state import spawn
-from crowd_evac.domain.constants import DT, GRID_CELL_SIZE
-from crowd_evac.domain.errors import DesignValidationError
+from crowd_evac.domain.constants import GRID_CELL_SIZE
 from crowd_evac.domain.floor_plan import (
     Exit,
     ExitSide,
@@ -37,10 +31,7 @@ from crowd_evac.scenarios.schema import (
     WallData,
 )
 
-SCHEMA_VERSION = "1.0"
-# Matches the harness default (optimization.harness.DEFAULT_MAX_TICKS);
-# duplicated so the designer does not import the optimisation stack.
-DESIGN_MAX_TICKS: int = 10_000
+SCHEMA_VERSION = "2.0"
 
 
 def export_scenario(layout: Layout) -> ScenarioData:
@@ -56,27 +47,11 @@ def export_scenario(layout: Layout) -> ScenarioData:
         DesignValidationError: If the layout itself is invalid.
     """
     validate(layout)
-    room = layout.room
-    floor_plan = _floor_plan(layout)
-    extras = layout.extras
-    simulation: dict[str, Any] = {
-        "dt": DT,
-        "max_ticks": DESIGN_MAX_TICKS,
-        **extras.simulation,
-    }
-    data: dict[str, Any] = {
-        "schema_version": SCHEMA_VERSION,
-        "name": room.name,
-        "floor_plan": floor_plan,
-        "agents": {
-            "count": extras.agent_count,
-            "spawn_seed": extras.spawn_seed,
-        },
-        "simulation": simulation,
-    }
-    if extras.events:
-        data["events"] = [dict(e) for e in extras.events]
-    return cast(ScenarioData, data)
+    return ScenarioData(
+        schema_version=SCHEMA_VERSION,
+        name=layout.room.name,
+        floor_plan=_floor_plan(layout),
+    )
 
 
 def _floor_plan(layout: Layout) -> FloorPlanData:
@@ -124,7 +99,7 @@ def _exit(layout: Layout, door: Doorway) -> ExitData:
 
 
 def check_headless(data: ScenarioData) -> None:
-    """Build floor plan, flow field and agents to prove the design runs.
+    """Build floor plan and flow field to prove the design runs.
 
     Args:
         data: Scenario produced by :func:`export_scenario`.
@@ -132,7 +107,6 @@ def check_headless(data: ScenarioData) -> None:
     Raises:
         ScenarioValidationError: E.g. no doorway.
         PathfindingError: If no exit cell is reachable.
-        DesignValidationError: If agents cannot be spawned.
     """
     fp = data["floor_plan"]
     plan = FloorPlan(
@@ -151,11 +125,6 @@ def check_headless(data: ScenarioData) -> None:
         ),
     )
     FlowField.build(plan, GRID_CELL_SIZE)
-    agents = data["agents"]
-    try:
-        spawn(plan, agents["count"], np.random.default_rng(agents["spawn_seed"]))
-    except ValueError as exc:
-        raise DesignValidationError(f"Cannot spawn agents: {exc}") from exc
 
 
 def build_validated_scenario(layout: Layout) -> ScenarioData:

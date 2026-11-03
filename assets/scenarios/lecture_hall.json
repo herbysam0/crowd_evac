@@ -1,144 +1,31 @@
 {
-  "schema_version": "1.0",
+  "schema_version": "2.0",
   "name": "lecture_hall",
   "floor_plan": {
     "width_m": 50.0,
     "height_m": 30.0,
     "walls": [
-      {
-        "x": 0.0,
-        "y": 0.0,
-        "width": 50.0,
-        "height": 0.5,
-        "label": "north_wall"
-      },
-      {
-        "x": 0.0,
-        "y": 29.5,
-        "width": 50.0,
-        "height": 0.5,
-        "label": "south_wall"
-      },
-      {
-        "x": 0.0,
-        "y": 0.0,
-        "width": 0.5,
-        "height": 30.0,
-        "label": "west_wall"
-      },
-      {
-        "x": 49.5,
-        "y": 0.0,
-        "width": 0.5,
-        "height": 30.0,
-        "label": "east_wall"
-      }
+      {"x": 0.0, "y": 0.0, "width": 50.0, "height": 0.5, "label": "north_wall"},
+      {"x": 0.0, "y": 29.5, "width": 50.0, "height": 0.5, "label": "south_wall"},
+      {"x": 0.0, "y": 0.0, "width": 0.5, "height": 30.0, "label": "west_wall"},
+      {"x": 49.5, "y": 0.0, "width": 0.5, "height": 30.0, "label": "east_wall"}
     ],
     "obstacles": [
-      {
-        "x": 5.0,
-        "y": 7.0,
-        "width": 17.0,
-        "height": 1.0,
-        "label": "seating_row_1_left"
-      },
-      {
-        "x": 28.0,
-        "y": 7.0,
-        "width": 17.0,
-        "height": 1.0,
-        "label": "seating_row_1_right"
-      },
-      {
-        "x": 5.0,
-        "y": 10.0,
-        "width": 17.0,
-        "height": 1.0,
-        "label": "seating_row_2_left"
-      },
-      {
-        "x": 28.0,
-        "y": 10.0,
-        "width": 17.0,
-        "height": 1.0,
-        "label": "seating_row_2_right"
-      },
-      {
-        "x": 5.0,
-        "y": 13.0,
-        "width": 17.0,
-        "height": 1.0,
-        "label": "seating_row_3_left"
-      },
-      {
-        "x": 28.0,
-        "y": 13.0,
-        "width": 17.0,
-        "height": 1.0,
-        "label": "seating_row_3_right"
-      },
-      {
-        "x": 5.0,
-        "y": 16.0,
-        "width": 17.0,
-        "height": 1.0,
-        "label": "seating_row_4_left"
-      },
-      {
-        "x": 28.0,
-        "y": 16.0,
-        "width": 17.0,
-        "height": 1.0,
-        "label": "seating_row_4_right"
-      },
-      {
-        "x": 5.0,
-        "y": 19.0,
-        "width": 17.0,
-        "height": 1.0,
-        "label": "seating_row_5_left"
-      },
-      {
-        "x": 28.0,
-        "y": 19.0,
-        "width": 17.0,
-        "height": 1.0,
-        "label": "seating_row_5_right"
-      }
+      {"x": 5.0, "y": 7.0, "width": 17.0, "height": 1.0, "label": "seating_row_1_left"},
+      {"x": 28.0, "y": 7.0, "width": 17.0, "height": 1.0, "label": "seating_row_1_right"},
+      {"x": 5.0, "y": 10.0, "width": 17.0, "height": 1.0, "label": "seating_row_2_left"},
+      {"x": 28.0, "y": 10.0, "width": 17.0, "height": 1.0, "label": "seating_row_2_right"},
+      {"x": 5.0, "y": 13.0, "width": 17.0, "height": 1.0, "label": "seating_row_3_left"},
+      {"x": 28.0, "y": 13.0, "width": 17.0, "height": 1.0, "label": "seating_row_3_right"},
+      {"x": 5.0, "y": 16.0, "width": 17.0, "height": 1.0, "label": "seating_row_4_left"},
+      {"x": 28.0, "y": 16.0, "width": 17.0, "height": 1.0, "label": "seating_row_4_right"},
+      {"x": 5.0, "y": 19.0, "width": 17.0, "height": 1.0, "label": "seating_row_5_left"},
+      {"x": 28.0, "y": 19.0, "width": 17.0, "height": 1.0, "label": "seating_row_5_right"}
     ],
     "exits": [
-      {
-        "x": 25.0,
-        "y": 0.5,
-        "width_m": 3.0,
-        "side": "north",
-        "capacity_per_second": 5,
-        "label": "main_exit"
-      },
-      {
-        "x": 1.0,
-        "y": 5.0,
-        "width_m": 1.5,
-        "side": "west",
-        "capacity_per_second": 2,
-        "label": "left_exit"
-      },
-      {
-        "x": 49.0,
-        "y": 5.0,
-        "width_m": 1.5,
-        "side": "east",
-        "capacity_per_second": 2,
-        "label": "right_exit"
-      }
+      {"x": 25.0, "y": 0.5, "width_m": 3.0, "side": "north", "capacity_per_second": 5, "label": "main_exit"},
+      {"x": 1.0, "y": 5.0, "width_m": 1.5, "side": "west", "capacity_per_second": 2, "label": "left_exit"},
+      {"x": 49.0, "y": 5.0, "width_m": 1.5, "side": "east", "capacity_per_second": 2, "label": "right_exit"}
     ]
-  },
-  "agents": {
-    "count": 150,
-    "spawn_seed": 42
-  },
-  "simulation": {
-    "dt": 0.05,
-    "max_ticks": 10000
   }
 }

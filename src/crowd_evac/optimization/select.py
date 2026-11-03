@@ -74,6 +74,7 @@ from crowd_evac.optimization.harness import (
 )
 from crowd_evac.optimization.stuck import stuck_count
 from crowd_evac.optimization.suite import SearchScenario, calibration_rigs
+from crowd_evac.scenarios.schema import EmergencyEventData
 
 logger = logging.getLogger(__name__)
 
@@ -103,13 +104,27 @@ winner is re-scored on seeds it was never tuned against — a guard against
 seed-overfitting (plan RK-2.3).
 """
 
-HAZARD_VALIDATION_SCENARIO: str = "hazard_lecture_hall"
-"""Bundled full-scale scenario carrying a scripted mid-run fire event.
+HAZARD_VALIDATION_SCENARIO: str = "lecture_hall_no_aisle"
+"""Bundled room used for the scripted-fire validation run.
 
-The only validation scenario that exercises ``hazard_avoidance_cost``: at its
+The only validation run that exercises ``hazard_avoidance_cost``: at its
 event tick a panic source blocks the main-exit approach, so the crowd must
 re-route to the side exits.
 """
+
+HAZARD_VALIDATION_AGENT_COUNT: int = 150
+"""Agents spawned in the hazard validation run (full Tier-A scale)."""
+
+HAZARD_VALIDATION_EVENTS: tuple[EmergencyEventData, ...] = (
+    {
+        "tick": 100,
+        "type": "place_panic_source",
+        "pos": [25.0, 3.5],
+        "intensity": 1.0,
+        "source_type": "fire",
+    },
+)
+"""Scripted fire injected during hazard validation (tick 100, main-exit approach)."""
 
 DEFAULT_HAZARD_EVAC_FLOOR: float = 0.95
 """Minimum mean evacuated fraction required of a hazard run to pass.
@@ -123,6 +138,12 @@ _LECTURE_HALL_FULL: str = "lecture_hall"
 
 _OPEN_ROOM: str = "open_room_search"
 """Open-room scenario; already at full scale (no down-scaled sibling)."""
+
+_LECTURE_HALL_FULL_AGENTS: int = 150
+"""Agent count of the full-scale ``lecture_hall`` validation run."""
+
+_OPEN_ROOM_AGENTS: int = 25
+"""Agent count of the open-room validation run."""
 
 
 # ---------------------------------------------------------------------------
@@ -380,8 +401,9 @@ def validation_suite() -> tuple[SearchScenario, ...]:
     """Return the hazard-free full-scale scenarios for Tier-A validation.
 
     Mirrors the search suite's topologies at full agent count: the 150-agent
-    lecture hall (full-scale sibling of ``lecture_hall_small``) and the
-    open-room plan (already full scale).  The hazard scenario is validated
+    ``lecture_hall`` at full count (it has a centre aisle, unlike the search
+    entry ``lecture_hall_no_aisle``) and the open-room plan (already full
+    scale).  The hazard scenario is validated
     separately by :func:`hazard_check`, not here.
 
     Returns:
@@ -391,17 +413,19 @@ def validation_suite() -> tuple[SearchScenario, ...]:
         SearchScenario(
             name=_LECTURE_HALL_FULL,
             scenario_ref=_LECTURE_HALL_FULL,
-            full_agent_count=150,
+            agent_count=_LECTURE_HALL_FULL_AGENTS,
+            full_agent_count=_LECTURE_HALL_FULL_AGENTS,
             description=(
-                "Full-scale lecture hall (150 agents) — un-down-scaled sibling "
-                "of lecture_hall_small; validates the chosen weights at Tier-A "
-                "count on the primary seating-row bottleneck."
+                "Full-scale lecture hall (150 agents) — the full-count "
+                "counterpart of the lecture_hall_no_aisle search entry; "
+                "validates the chosen weights at Tier-A count."
             ),
         ),
         SearchScenario(
             name=_OPEN_ROOM,
             scenario_ref=_OPEN_ROOM,
-            full_agent_count=25,
+            agent_count=_OPEN_ROOM_AGENTS,
+            full_agent_count=_OPEN_ROOM_AGENTS,
             description=(
                 "Open room with two competing exits — validates routing and "
                 "herding at its native scale (no down-scaled sibling)."
@@ -497,7 +521,12 @@ def hazard_check(
     """
     if not seeds:
         raise ValueError("seeds must be non-empty")
-    field = rerouted_flow_field(scenario_ref, params)
+    field = rerouted_flow_field(
+        scenario_ref,
+        params,
+        agent_count=HAZARD_VALIDATION_AGENT_COUNT,
+        events=HAZARD_VALIDATION_EVENTS,
+    )
     results = evaluate_batch(
         [params],
         scenario_ref,
@@ -506,6 +535,8 @@ def hazard_check(
         wall_clock_cap_s=DEFAULT_WALL_CLOCK_CAP_S,
         history_interval=DEFAULT_HISTORY_INTERVAL,
         max_workers=max_workers,
+        agent_count=HAZARD_VALIDATION_AGENT_COUNT,
+        events=HAZARD_VALIDATION_EVENTS,
     )
     worst_stuck = max(stuck_count(r, field) for r in results)
     mean_evac = sum(r.evacuated_fraction for r in results) / len(results)

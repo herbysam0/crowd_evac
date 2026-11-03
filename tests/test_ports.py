@@ -60,8 +60,8 @@ class FakeInputSource:
 class FakeScenarioRepository:
     """Trivial ScenarioRepository implementation."""
 
-    def load_scenario(self, scenario_id: str) -> tuple[FloorPlan, int]:
-        """Return a minimal FloorPlan and agent count."""
+    def load_scenario(self, scenario_id: str) -> FloorPlan:
+        """Return a minimal FloorPlan."""
         from crowd_evac.domain.floor_plan import Exit, ExitSide
 
         exit_obj = Exit(
@@ -71,14 +71,13 @@ class FakeScenarioRepository:
             side=ExitSide.NORTH,
             capacity_per_second=2,
         )
-        floor = FloorPlan(
+        return FloorPlan(
             width_m=10.0,
             height_m=10.0,
             walls=(),
             obstacles=(),
             exits=(exit_obj,),
         )
-        return floor, 0
 
 
 class TestRendererProtocol:
@@ -174,9 +173,9 @@ class TestScenarioRepositoryProtocol:
         assert hasattr(repo, "load_scenario")
         assert callable(repo.load_scenario)
 
-    def test_scenario_repository_load_scenario_returns_tuple(self) -> None:
-        """Verify load_scenario returns (FloorPlan, int) tuple."""
+    def test_scenario_repository_load_scenario_returns_floor_plan(
+        self,
+    ) -> None:
+        """Verify load_scenario returns the FloorPlan alone."""
         repo = FakeScenarioRepository()
-        floor, count = repo.load_scenario("test")
-        assert isinstance(floor, FloorPlan)
-        assert isinstance(count, int)
+        assert isinstance(repo.load_scenario("test"), FloorPlan)

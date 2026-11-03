@@ -123,6 +123,7 @@ def _one_scenario() -> SearchScenario:
     return SearchScenario(
         name="mock",
         scenario_ref="open_room_search",
+        agent_count=25,
         full_agent_count=25,
         description="mock scenario for fitness unit tests",
     )
@@ -140,6 +141,7 @@ def patch_moving(monkeypatch: pytest.MonkeyPatch) -> None:
         *,
         wall_clock_cap_s: float,
         history_interval: int,
+        agent_count: int,
     ) -> RunResult:
         return _moving_run(seed)
 
@@ -159,6 +161,7 @@ def patch_deadlock(monkeypatch: pytest.MonkeyPatch) -> None:
         *,
         wall_clock_cap_s: float,
         history_interval: int,
+        agent_count: int,
     ) -> RunResult:
         return _deadlock_run()
 

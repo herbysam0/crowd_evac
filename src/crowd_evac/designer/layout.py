@@ -7,8 +7,7 @@ from __future__ import annotations
 
 import itertools
 from collections.abc import Mapping
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass
 
 from crowd_evac.designer.geometry import (
     DEFAULT_WALL_THICKNESS_M,
@@ -85,22 +84,6 @@ class Doorway:
     capacity_per_second: int
 
 
-# Used when a design is not loaded from a file; the designer has no UI for
-# these (schema 1.0 requires the agents block).
-DEFAULT_AGENT_COUNT: int = 50
-DEFAULT_SPAWN_SEED: int = 42
-
-
-@dataclass(frozen=True)
-class Extras:
-    """Scenario settings the designer does not edit but must preserve."""
-
-    agent_count: int = DEFAULT_AGENT_COUNT
-    spawn_seed: int = DEFAULT_SPAWN_SEED
-    simulation: Mapping[str, Any] = field(default_factory=dict)
-    events: tuple[Mapping[str, Any], ...] = ()
-
-
 @dataclass(frozen=True)
 class Layout:
     """Complete design snapshot."""
@@ -109,7 +92,6 @@ class Layout:
     walls: Mapping[int, Wall]
     obstacles: Mapping[int, Obstacle]
     doorways: Mapping[int, Doorway]
-    extras: Extras = field(default_factory=Extras)
 
 
 def rect_of_wall(layout: Layout, wall: Wall) -> Rect:

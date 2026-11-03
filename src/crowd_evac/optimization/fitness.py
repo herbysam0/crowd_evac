@@ -224,6 +224,7 @@ class _JobSpec:
     max_ticks: int
     wall_clock_cap_s: float
     history_interval: int
+    agent_count: int
 
 
 def _run_job(spec: _JobSpec) -> RunResult:
@@ -244,6 +245,7 @@ def _run_job(spec: _JobSpec) -> RunResult:
         spec.max_ticks,
         wall_clock_cap_s=spec.wall_clock_cap_s,
         history_interval=spec.history_interval,
+        agent_count=spec.agent_count,
     )
 
 
@@ -378,12 +380,14 @@ def _build_specs(params: ForceParams, cfg: FitnessConfig) -> list[_JobSpec]:
                 _JobSpec(
                     params, scen.scenario_ref, seed, cfg.max_ticks,
                     cfg.wall_clock_cap_s, cfg.history_interval,
+                    scen.agent_count,
                 )
             )
         specs.append(
             _JobSpec(
                 params, cfg.rig.scenario_ref, seed, cfg.max_ticks,
                 cfg.wall_clock_cap_s, cfg.history_interval,
+                cfg.rig.agent_count,
             )
         )
     return specs

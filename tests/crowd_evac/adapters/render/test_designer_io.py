@@ -71,7 +71,7 @@ class TestLoadDesign:
         pending, loaded = load_design(ctl, "fixture_minimal", None, clean)
         assert (pending, loaded) == (None, True)
         assert ctl.model.layout.room.name == "fixture_minimal"
-        assert ctl.model.layout.extras.agent_count == 50
+        assert not hasattr(ctl.model.layout, "extras")
 
     def test_unsaved_changes_need_second_click(self) -> None:
         """Verify load asks before discarding edits, then proceeds."""

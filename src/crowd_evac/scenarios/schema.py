@@ -4,7 +4,7 @@ These types are the contract between the on-disk JSON format and the
 scenario loader. All fields map 1:1 to JSON keys. Optional fields use
 ``NotRequired``; required fields are present in all valid scenario files.
 
-Schema version: "1.0"
+Schema version: "2.0"
 """
 from __future__ import annotations
 
@@ -52,26 +52,11 @@ class FloorPlanData(TypedDict):
     exits: list[ExitData]
 
 
-class AgentConfigData(TypedDict):
-    """JSON schema for the agents section of a scenario file."""
-
-    count: int
-    spawn_seed: int
-
-
-class SimConfigData(TypedDict, total=False):
-    """JSON schema for optional simulation parameters.
-
-    All fields are optional; defaults are taken from domain constants when
-    absent.
-    """
-
-    dt: float
-    max_ticks: int
-
-
 class EmergencyEventData(TypedDict):
-    """JSON schema for one scripted emergency event injected mid-run.
+    """One scripted emergency event injected mid-run (run-time input).
+
+    Not part of the scenario file: built by the ``--hazard`` CLI flag and by
+    the optimiser's hazard validation.
 
     Mirrors a runtime panic-source injection
     (:func:`crowd_evac.application.injection.add_panic_source`): at simulation
@@ -105,28 +90,20 @@ class EmergencyEventData(TypedDict):
 
 
 class ScenarioData(TypedDict):
-    """Root JSON schema for a crowd_evac scenario file.
+    """Root JSON schema for a crowd_evac scenario file (room only).
+
+    Agents and hazards are run-time input (``--agents``, ``--seed``,
+    ``--hazard``), not part of the file.
 
     Example structure::
 
         {
-          "schema_version": "1.0",
+          "schema_version": "2.0",
           "name": "lecture_hall",
-          "floor_plan": { ... },
-          "agents": {"count": 200, "spawn_seed": 42},
-          "simulation": {"dt": 0.05, "max_ticks": 10000},
-          "events": [
-            {"tick": 200, "type": "place_panic_source", "pos": [25.0, 15.0]}
-          ]
+          "floor_plan": { ... }
         }
-
-    The ``events`` list is optional and additive (schema stays at "1.0"):
-    scenario files without it load exactly as before.
     """
 
     schema_version: str
     name: str
     floor_plan: FloorPlanData
-    agents: AgentConfigData
-    simulation: SimConfigData
-    events: NotRequired[list[EmergencyEventData]]
