@@ -193,6 +193,56 @@ Built on clean-architecture patterns:
 - **Adapters:** Concrete implementations (arcade rendering, file I/O)
 - **Application:** Fixed-step orchestration and user interaction
 
-## License
+## Git workflow — commit, push, PR, merge, close issue
 
-MIT
+Run after the quality gate passes, from the **project root** in PowerShell.
+Update every `<...>` placeholder before running its command — nothing in
+angle brackets is meant to run as-is.
+
+```powershell
+# --- 1. Commit ---
+git add -A OR git add <file1> <file2>
+git commit -m @'
+<type>(<scope>): <short summary>
+
+<body: what changed and why>
+
+Refs: <issue-or-spec-reference>
+'@
+```
+
+```powershell
+# --- 2. Push ---
+git push -u origin <branch-name>
+```
+
+```powershell
+# --- 3. Open PR ---
+gh pr create --title "<pr-title>" --body @'
+## Summary
+<bullet points of what changed>
+
+## Test plan
+<checklist of how it was verified>
+
+Closes #<issue-number>
+'@
+```
+
+```powershell
+# --- 4. Merge to main ---
+gh pr merge <pr-number> --squash --delete-branch
+```
+
+```powershell
+# --- 5. Close issue ---
+gh issue close <issue-number> --comment "Fixed in #<pr-number>: <one-line summary of the fix>."
+```
+
+```powershell
+# --- 6. Push and merge into main without PR ---
+git switch main
+git pull origin main
+git merge <local-branch>
+git push origin main
+```
