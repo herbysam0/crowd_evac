@@ -2,7 +2,7 @@
 
 Covers:
   - every bundled scenario imports, re-exports and reloads with identical
-    geometry and preserved agents/simulation/events
+    geometry and a room-only file
   - exit-to-wall matching by position (mislabelled sides), wall thickness
   - unrepresentable scenarios fail with a clear error
 """
@@ -39,7 +39,7 @@ def _exit_key(plan: FloorPlan) -> list[tuple[float, float, int]]:
 
 @pytest.mark.parametrize("name", BUNDLED)
 def test_bundled_scenario_round_trips(name: str, tmp_path: Path) -> None:
-    """Import -> export -> reload keeps geometry, agents, sim and events."""
+    """Import -> export -> reload keeps geometry and writes a room-only file."""
     plan, data = load_scenario_file(SCENARIOS_DIR / f"{name}.json")
     layout = layout_from_scenario(plan, data)
     saved = write_scenario(build_validated_scenario(layout), tmp_path)
@@ -52,9 +52,8 @@ def test_bundled_scenario_round_trips(name: str, tmp_path: Path) -> None:
         map(rect, plan.obstacles)
     )
     assert _exit_key(plan2) == _exit_key(plan)
-    assert data2["agents"] == data["agents"]
-    assert data2["simulation"] == data["simulation"]
-    assert data2.get("events", []) == data.get("events", [])
+    assert data2["name"] == data["name"]
+    assert set(data2) == {"schema_version", "name", "floor_plan"}
 
 
 def test_wall_rect_becomes_centreline_with_thickness() -> None:
@@ -98,11 +97,9 @@ def test_exit_without_boundary_wall_is_rejected() -> None:
         exits=(Exit(5.0, 0.25, 2.0, ExitSide.NORTH, 5, "lonely"),),
     )
     data: ScenarioData = {  # type: ignore[typeddict-item]
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "name": "x",
         "floor_plan": {},  # type: ignore[typeddict-item]
-        "agents": {"count": 3, "spawn_seed": 1},
-        "simulation": {},
     }
     with pytest.raises(DesignValidationError, match="lonely"):
         layout_from_scenario(plan, data)

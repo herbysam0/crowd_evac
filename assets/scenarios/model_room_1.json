@@ -1,57 +1,18 @@
 {
-  "schema_version": "1.0",
+  "schema_version": "2.0",
   "name": "model_room_1",
   "floor_plan": {
     "width_m": 3.7,
     "height_m": 6.0,
     "walls": [
-      {
-        "x": 0.8,
-        "y": 1.0,
-        "width": 0.2,
-        "height": 4.0,
-        "label": "wall_1"
-      },
-      {
-        "x": 1.0,
-        "y": 5.0,
-        "width": 2.5,
-        "height": 0.2,
-        "label": "wall_2"
-      },
-      {
-        "x": 1.0,
-        "y": 0.8,
-        "width": 2.5,
-        "height": 0.2,
-        "label": "wall_3"
-      },
-      {
-        "x": 3.5,
-        "y": 1.0,
-        "width": 0.2,
-        "height": 4.0,
-        "label": "wall_4"
-      }
+      {"x": 0.8, "y": 1.0, "width": 0.2, "height": 4.0, "label": "wall_1"},
+      {"x": 1.0, "y": 5.0, "width": 2.5, "height": 0.2, "label": "wall_2"},
+      {"x": 1.0, "y": 0.8, "width": 2.5, "height": 0.2, "label": "wall_3"},
+      {"x": 3.5, "y": 1.0, "width": 0.2, "height": 4.0, "label": "wall_4"}
     ],
     "obstacles": [],
     "exits": [
-      {
-        "x": 3.5,
-        "y": 4.15,
-        "width_m": 0.85,
-        "side": "east",
-        "capacity_per_second": 20,
-        "label": "door_5"
-      }
+      {"x": 3.5, "y": 4.15, "width_m": 0.85, "side": "east", "capacity_per_second": 20, "label": "door_5"}
     ]
-  },
-  "agents": {
-    "count": 1,
-    "spawn_seed": 42
-  },
-  "simulation": {
-    "dt": 0.05,
-    "max_ticks": 10000
   }
 }

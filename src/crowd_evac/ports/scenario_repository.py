@@ -8,18 +8,19 @@ if TYPE_CHECKING:
 
 
 class ScenarioRepository(Protocol):
-    """Load scenario data (floor plans, initial population, parameters)."""
+    """Load scenario data (room geometry only).
 
-    def load_scenario(self, scenario_id: str) -> tuple[FloorPlan, int]:
+    The population and hazards are run-time input, not part of a scenario.
+    """
+
+    def load_scenario(self, scenario_id: str) -> FloorPlan:
         """Load a scenario by ID.
 
         Args:
             scenario_id: Identifier for the scenario (e.g., 'lecture_hall').
 
         Returns:
-            Tuple of (FloorPlan, initial_agent_count). The FloorPlan
-            includes all walls, obstacles, and exits; the count is the
-            number of agents to spawn initially.
+            The FloorPlan with all walls, obstacles, and exits.
 
         Raises:
             FileNotFoundError: If the scenario data cannot be found.

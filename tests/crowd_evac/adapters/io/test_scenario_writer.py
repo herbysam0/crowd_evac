@@ -38,7 +38,7 @@ def _data(name: str = "room_a", with_exit: bool = True) -> ScenarioData:
             }
         ]
     data: Any = {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "name": name,
         "floor_plan": {
             "width_m": 10.0,
@@ -47,8 +47,6 @@ def _data(name: str = "room_a", with_exit: bool = True) -> ScenarioData:
             "obstacles": [],
             "exits": exits,
         },
-        "agents": {"count": 3, "spawn_seed": 1},
-        "simulation": {"dt": 0.05, "max_ticks": 100},
     }
     return data  # type: ignore[no-any-return]
 

@@ -28,14 +28,14 @@ pip install -r requirements.txt
 # OR install project in editable mode with dev dependencies
 pip install -e ".[dev]"
 
-# Run the game (launches Lecture Hall scenario)
+# Run the game (Lecture Hall, 3 agents, seed 42)
 python -m crowd_evac
 
-# List the available scenarios
+# List the available rooms
 python -m crowd_evac --list
 
-# Run a specific scenario by name (short form: -s)
-python -m crowd_evac --scenario bottleneck_corridor
+# Run a room with a chosen population (short form: -s)
+python -m crowd_evac --scenario bottleneck_corridor --agents 60 --seed 7
 
 # Open the room designer
 python -m crowd_evac --design
@@ -51,20 +51,59 @@ mypy src/ --strict
 ## Running a Specific Scenario
 
 Scenarios are the JSON files in `assets/scenarios/`; the name is the file name
-without `.json`. Any file placed there (including rooms saved from the room
-designer) shows up in `--list` and can be run by name.
+without `.json`. A scenario file describes the **room only** (`schema_version`
+`"2.0"`, `name`, `floor_plan`). Any file placed there (including rooms saved
+from the room designer) shows up in `--list` and can be run by name.
 
-```powershell
-# Print every available scenario name and exit
-python -m crowd_evac --list
+The population and hazards are run-time input:
 
-# Run one by name
-python -m crowd_evac --scenario lecture_hall_small
-python -m crowd_evac -s open_room_search
-```
+| Flag | Meaning | Default |
+|---|---|---|
+| `--agents N` | number of agents to spawn (N >= 1) | 3 |
+| `--seed S` | spawn RNG seed (S >= 0) | 42 |
+| `--hazard K=V,...` | scripted hazard, repeatable | none |
+
+`--hazard` takes comma-separated `key=value` pairs. `x` and `y` (metres) are
+required; optional keys are `tick` (default 0), `intensity`, `radius`,
+`decay_rate`, `block_radius`, `blocks_navigation` (`true`/`false`) and
+`source_type`. Unset keys use the defaults of a mouse-placed source. The same
+seed, agent count and hazards reproduce the same run, and Space-reset replays
+it. A hazard outside the room, an unknown or repeated key, or a bad value is a
+usage error. `--agents`, `--seed` and `--hazard` cannot be combined with
+`--design` or `--list`.
+
+Commands for each bundled room:
+
+| Room | Command |
+|---|---|
+| `lecture_hall` | `python -m crowd_evac -s lecture_hall --agents 150 --seed 42` |
+| `lecture_hall_no_aisle` | `python -m crowd_evac -s lecture_hall_no_aisle --agents 30 --seed 42` |
+| `lecture_hall_no_aisle` + fire | `python -m crowd_evac -s lecture_hall_no_aisle --agents 150 --seed 42 --hazard x=25,y=3.5,tick=100,source_type=fire` |
+| `bottleneck_corridor` | `python -m crowd_evac -s bottleneck_corridor --agents 60 --seed 7` |
+| `open_room_search` | `python -m crowd_evac -s open_room_search --agents 25 --seed 42` |
+| `fixture_minimal` | `python -m crowd_evac -s fixture_minimal --agents 50 --seed 42` |
+| `model_room_1` | `python -m crowd_evac -s model_room_1 --agents 1 --seed 42` |
+
+`lecture_hall_no_aisle` (formerly `lecture_hall_small`) has the lecture hall's
+50 x 30 m footprint but solid seating rows and no centre aisle, so it is not
+the same geometry as `lecture_hall`. The old `hazard_lecture_hall` room is the
+fire command above.
 
 An unknown name is rejected with the list of valid choices. Without
 `--scenario`, the default is `lecture_hall`.
+
+### Migrating schema-1.0 files
+
+Version 1.0 files (with `agents`, `simulation` or `events` blocks) are
+rejected. Convert them with:
+
+```powershell
+python scripts/migrate_scenarios.py assets\scenarios\my_room.json
+```
+
+The script rewrites each file to `"2.0"` and prints the equivalent run
+command, including any `--hazard` flags, so no value is lost. Files already on
+`"2.0"` are skipped.
 
 ## Room Designer
 
@@ -75,8 +114,9 @@ python -m crowd_evac --design   # short form: -d
 Draw walls (drag), add doorways on walls at the room edge, add obstacles, and
 edit any item's numbers in the side panel. **Save** writes
 `assets/scenarios/<name>.json` (name set under Room); the new room then runs
-with `--scenario <name>`. **Open saved room** loads an existing scenario for
-editing. `--design` cannot be combined with `--list` or `--scenario`.
+with `--scenario <name> --agents N`. **Open saved room** loads an existing
+scenario for editing. Saved files hold the room only. `--design` cannot be
+combined with `--list`, `--scenario`, `--agents`, `--seed` or `--hazard`.
 
 ## Project Structure
 
@@ -99,7 +139,7 @@ docs/              # Documentation (PRD, plans)
 
 ## Gameplay
 
-- **Launch:** `python -m crowd_evac` opens directly into the Lecture Hall scenario
+- **Launch:** `python -m crowd_evac` opens directly into the Lecture Hall scenario (3 agents; use `--agents 150` for the full crowd)
 - **Controls:**
   - **Click and drag** to place/move a panic source (fire, smoke, etc.)
   - **Spacebar** to start, pause, or reset the simulation

@@ -39,6 +39,8 @@ class SearchScenario:
             applicable.
         scenario_ref: Bundled name (``str``) or filesystem path
             (:class:`~pathlib.Path`) forwarded to the harness.
+        agent_count: Agents spawned in each evaluation run.  Scenario files
+            no longer carry a population, so the suite owns it.
         full_agent_count: Agent count in the corresponding full-scale
             scenario, for reporting the down-scale factor.  Set equal to
             the search count when the scenario has no full-scale sibling.
@@ -47,6 +49,7 @@ class SearchScenario:
 
     name: str
     scenario_ref: str | Path
+    agent_count: int
     full_agent_count: int
     description: str
 
@@ -63,6 +66,7 @@ class CalibrationRig:
         name: Unique identifier, matching the bundled scenario name.
         scenario_ref: Bundled name (``str``) or filesystem path
             (:class:`~pathlib.Path`) forwarded to the harness.
+        agent_count: Agents spawned in each rig run.
         door_width_m: Width of the controlling bottleneck opening in metres.
             Used to normalise egress count to specific flow
             ``q = evacuated_count / (evac_time × door_width_m)``
@@ -72,6 +76,7 @@ class CalibrationRig:
 
     name: str
     scenario_ref: str | Path
+    agent_count: int
     door_width_m: float
     description: str
 
@@ -81,7 +86,16 @@ class CalibrationRig:
 # ---------------------------------------------------------------------------
 
 _LECTURE_HALL_FULL_AGENTS: int = 150
-"""Agent count in the unmodified full-scale ``lecture_hall`` bundled scenario."""
+"""Agent count of the full-scale ``lecture_hall`` run."""
+
+_LECTURE_HALL_NO_AISLE_AGENTS: int = 30
+"""Search-suite agent count for ``lecture_hall_no_aisle``."""
+
+_OPEN_ROOM_AGENTS: int = 25
+"""Agent count for ``open_room_search`` (search and validation alike)."""
+
+_BOTTLENECK_AGENTS: int = 60
+"""Rig agent count for ``bottleneck_corridor`` (sustains a queue)."""
 
 
 # ---------------------------------------------------------------------------
@@ -95,10 +109,10 @@ def search_suite() -> list[SearchScenario]:
     The list contains two entries that cover distinct floor-plan topologies,
     preventing the optimiser from overfitting to a single geometry:
 
-    1. **lecture_hall_small** — the lecture-hall floor plan (50 m × 30 m,
-       five seating-row obstacles, three exits) with 30 agents — 20 % of
-       the full 150-agent scenario.  Keeps the primary seating-row bottleneck
-       at low evaluation cost.
+    1. **lecture_hall_no_aisle** — a 50 m × 30 m hall with solid seating
+       rows and no centre aisle (not the same geometry as ``lecture_hall``),
+       with 30 agents — 20 % of the 150-agent ``lecture_hall`` run.  Keeps a
+       row-induced bottleneck at low evaluation cost.
     2. **open_room_search** — a 20 m × 15 m open room with no interior
        obstacles and two competing exits (north 3 m, east 2 m), 25 agents.
        Tests routing and herding without row-induced bottlenecks.
@@ -116,20 +130,22 @@ def search_suite() -> list[SearchScenario]:
     """
     return [
         SearchScenario(
-            name="lecture_hall_small",
-            scenario_ref="lecture_hall_small",
+            name="lecture_hall_no_aisle",
+            scenario_ref="lecture_hall_no_aisle",
+            agent_count=_LECTURE_HALL_NO_AISLE_AGENTS,
             full_agent_count=_LECTURE_HALL_FULL_AGENTS,
             description=(
-                "Down-scaled lecture hall: same 50 m × 30 m geometry "
-                "with five seating-row obstacles and three exits, reduced "
-                "to 30 agents (20 % of full scale) for cheap optimiser "
+                "Lecture hall without a centre aisle: 50 m × 30 m with "
+                "solid seating rows and three exits, 30 agents (20 % of "
+                "the 150-agent lecture_hall run) for cheap optimiser "
                 "evaluation."
             ),
         ),
         SearchScenario(
             name="open_room_search",
             scenario_ref="open_room_search",
-            full_agent_count=25,
+            agent_count=_OPEN_ROOM_AGENTS,
+            full_agent_count=_OPEN_ROOM_AGENTS,
             description=(
                 "Contrasting open room: 20 m × 15 m with no interior "
                 "obstacles and two competing exits (north 3 m, east 2 m), "
@@ -170,6 +186,7 @@ def calibration_rigs() -> list[CalibrationRig]:
         CalibrationRig(
             name="bottleneck_corridor",
             scenario_ref="bottleneck_corridor",
+            agent_count=_BOTTLENECK_AGENTS,
             door_width_m=1.2,
             description=(
                 "15 m × 10 m room divided by an interior wall with a "

@@ -254,7 +254,8 @@ that build on that core.
 - **R3.1** A floor plan defines **walls**, **obstacles**, a **walkable region**, and one or
   more **exits**, in a single authored scenario format (no CAD/BIM import; see §4).
   - AC: a scenario file declares walls, obstacles, walkable space, and exits and loads into
-    the domain model.
+    the domain model. Scenario files describe the room only (schema 2.0); the population
+    (`--agents`, `--seed`) and scripted hazards (`--hazard`) are run-time input.
 - **R3.2** Walls and obstacles are **collision boundaries**: agents cannot pass through them
   and receive a boundary-avoidance force near them.
   - AC: no agent penetrates a wall/obstacle; an agent driven toward a wall is deflected along
@@ -451,7 +452,8 @@ that build on that core.
 ### FR-13 Pre-Made Environment Library (scenario templates) — P0
 
 Each template is a tuned, loadable scenario shipped as default data (FR-0) with documented
-topology, exits, bottlenecks, and agent-count range, built on the FR-3 floor-plan and (where
+topology, exits, bottlenecks, and recommended agent-count range (the count itself is
+run-time input), built on the FR-3 floor-plan and (where
 multi-level) FR-9 topology models.
 
 - **R13.1 Lecture Hall** — 50–300 agents; tiered seating; front-stage exit + optional side

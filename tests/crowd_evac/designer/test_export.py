@@ -31,6 +31,8 @@ from crowd_evac.pathfinding.flow_field import FlowField
 ROOM_W = 15.0
 ROOM_H = 10.0
 MAX_STEPS = 6000
+RUN_AGENTS = 20
+RUN_SEED = 42
 
 
 @pytest.fixture
@@ -55,13 +57,11 @@ class TestExportFields:
     """Schema fields and constants."""
 
     def test_header_fields(self, model: DesignModel) -> None:
-        """Verify version, name, agents and simulation block."""
+        """Verify export is version, name and floor plan only."""
         data = export_scenario(model.layout)
-        assert data["schema_version"] == "1.0"
+        assert data["schema_version"] == "2.0"
         assert data["name"] == "unit_room"
-        assert data["agents"] == {"count": 50, "spawn_seed": 42}
-        assert data["simulation"]["dt"] == 0.05
-        assert data["simulation"]["max_ticks"] > 0
+        assert set(data) == {"schema_version", "name", "floor_plan"}
 
     def test_empty_design_exports_empty_lists(
         self, model: DesignModel
@@ -168,9 +168,9 @@ class TestRoundTrip:
         model.add_obstacle(6, 4, 1, 2)
         path = write_scenario(build_validated_scenario(model.layout), tmp_path)
 
-        plan, data = load_scenario_file(path)
-        rng = SeededRNG(data["agents"]["spawn_seed"])
-        state = spawn(plan, data["agents"]["count"], rng.generator)
+        plan, _ = load_scenario_file(path)
+        rng = SeededRNG(RUN_SEED)
+        state = spawn(plan, RUN_AGENTS, rng.generator)
         sim = Simulation(
             state=state,
             flow_field=FlowField.build(plan),
@@ -184,4 +184,24 @@ class TestRoundTrip:
             if sim.is_complete:
                 break
             sim.step()
-        assert sim.snapshot().evacuated_count == data["agents"]["count"]
+        assert sim.snapshot().evacuated_count == RUN_AGENTS
+
+    def test_saved_design_runs_through_cli_builder(
+        self,
+        model: DesignModel,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Verify a saved room loads by name with CLI-supplied agents/seed."""
+        from crowd_evac.adapters.io import scenario_loader
+        from crowd_evac.application.cli import build_simulation_from_scenario
+
+        walls = _closed_room(model)
+        model.add_doorway(walls["east"], 5.0, 3.0)
+        write_scenario(build_validated_scenario(model.layout), tmp_path)
+        monkeypatch.setattr(scenario_loader, "SCENARIOS_DIR", tmp_path)
+
+        sim, plan = build_simulation_from_scenario("unit_room", RUN_AGENTS, 1)
+        assert sim.tick == 0
+        assert sim.snapshot().positions.shape == (RUN_AGENTS, 2)
+        assert plan.width_m > 0.0

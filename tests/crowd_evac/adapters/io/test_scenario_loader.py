@@ -27,7 +27,7 @@ from crowd_evac.domain.floor_plan import ExitSide, FloorPlan
 def valid_scenario_dict() -> dict[str, object]:
     """Return a minimal valid scenario as a plain Python dict."""
     return {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "name": "unit_test_room",
         "floor_plan": {
             "width_m": 10.0,
@@ -47,8 +47,6 @@ def valid_scenario_dict() -> dict[str, object]:
                 }
             ],
         },
-        "agents": {"count": 50, "spawn_seed": 42},
-        "simulation": {"dt": 0.05, "max_ticks": 5000},
     }
 
 
@@ -117,11 +115,26 @@ class TestLoadScenarioFileHappyPath:
         assert exit_.capacity_per_second == 5
         assert exit_.label == "main_exit"
 
-    def test_agent_config_in_scenario_data(self, scenario_file: Path) -> None:
-        """Verify agents section is accessible in the returned ScenarioData."""
+    def test_scenario_data_is_room_only(self, scenario_file: Path) -> None:
+        """Verify ScenarioData carries only version, name and floor plan."""
         _, data = load_scenario_file(scenario_file)
-        assert data["agents"]["count"] == 50
-        assert data["agents"]["spawn_seed"] == 42
+        assert set(data) == {"schema_version", "name", "floor_plan"}
+        assert data["schema_version"] == "2.0"
+
+    def test_removed_blocks_in_file_do_not_reach_scenario_data(
+        self, tmp_path: Path, valid_scenario_dict: dict[str, object]
+    ) -> None:
+        """Verify leftover agents/simulation/events keys are dropped."""
+        scenario = {
+            **valid_scenario_dict,
+            "agents": {"count": 5, "spawn_seed": 1},
+            "simulation": {"dt": 0.05},
+            "events": [],
+        }
+        path = tmp_path / "leftovers.json"
+        path.write_text(json.dumps(scenario), encoding="utf-8")
+        _, data = load_scenario_file(path)
+        assert set(data) == {"schema_version", "name", "floor_plan"}
 
     def test_optional_walls_default_to_empty(
         self, tmp_path: Path, valid_scenario_dict: dict[str, object]
@@ -168,20 +181,19 @@ class TestLoadScenarioFileMalformed:
     def test_missing_floor_plan_key_raises(self, tmp_path: Path) -> None:
         """Verify absence of floor_plan key raises MalformedScenarioError."""
         incomplete = {
-            "schema_version": "1.0",
+            "schema_version": "2.0",
             "name": "broken",
-            "agents": {"count": 1, "spawn_seed": 0},
         }
         path = tmp_path / "incomplete.json"
         path.write_text(json.dumps(incomplete), encoding="utf-8")
         with pytest.raises(MalformedScenarioError, match="floor_plan"):
             load_scenario_file(path)
 
-    def test_missing_agents_key_raises(self, tmp_path: Path) -> None:
-        """Verify absence of agents key raises MalformedScenarioError."""
-        incomplete = {
-            "schema_version": "1.0",
-            "name": "broken",
+    def test_file_without_agents_block_loads(self, tmp_path: Path) -> None:
+        """Verify a 2.0 file needs no agents block."""
+        scenario = {
+            "schema_version": "2.0",
+            "name": "room_only",
             "floor_plan": {
                 "width_m": 5.0, "height_m": 5.0, "exits": [
                     {"x": 2.5, "y": 0.0, "width_m": 1.0,
@@ -189,9 +201,34 @@ class TestLoadScenarioFileMalformed:
                 ],
             },
         }
-        path = tmp_path / "no_agents.json"
-        path.write_text(json.dumps(incomplete), encoding="utf-8")
-        with pytest.raises(MalformedScenarioError, match="agents"):
+        path = tmp_path / "room_only.json"
+        path.write_text(json.dumps(scenario), encoding="utf-8")
+        floor_plan, data = load_scenario_file(path)
+        assert floor_plan.width_m == 5.0
+        assert data["name"] == "room_only"
+
+    def test_legacy_1_0_rejected_naming_migration_script(
+        self, tmp_path: Path, valid_scenario_dict: dict[str, object]
+    ) -> None:
+        """Verify a 1.0 file is rejected and the error names the script."""
+        legacy = {
+            **valid_scenario_dict,
+            "schema_version": "1.0",
+            "agents": {"count": 50, "spawn_seed": 42},
+        }
+        path = tmp_path / "legacy.json"
+        path.write_text(json.dumps(legacy), encoding="utf-8")
+        with pytest.raises(
+            MalformedScenarioError, match="migrate_scenarios.py"
+        ):
+            load_scenario_file(path)
+
+    def test_missing_schema_version_raises(self, tmp_path: Path) -> None:
+        """Verify absence of schema_version raises MalformedScenarioError."""
+        path = tmp_path / "no_version.json"
+        path.write_text(json.dumps({"name": "x", "floor_plan": {}}),
+                        encoding="utf-8")
+        with pytest.raises(MalformedScenarioError, match="schema_version"):
             load_scenario_file(path)
 
     def test_unsupported_schema_version_raises(self, tmp_path: Path) -> None:
@@ -205,7 +242,6 @@ class TestLoadScenarioFileMalformed:
                      "side": "south", "capacity_per_second": 1}
                 ],
             },
-            "agents": {"count": 1, "spawn_seed": 0},
         }
         path = tmp_path / "future.json"
         path.write_text(json.dumps(scenario), encoding="utf-8")
@@ -215,7 +251,7 @@ class TestLoadScenarioFileMalformed:
     def test_invalid_exit_side_raises(self, tmp_path: Path) -> None:
         """Verify an unrecognised exit side value raises MalformedScenarioError."""
         scenario = {
-            "schema_version": "1.0",
+            "schema_version": "2.0",
             "name": "bad_side",
             "floor_plan": {
                 "width_m": 5.0, "height_m": 5.0,
@@ -224,7 +260,6 @@ class TestLoadScenarioFileMalformed:
                      "side": "diagonal", "capacity_per_second": 1}
                 ],
             },
-            "agents": {"count": 1, "spawn_seed": 0},
         }
         path = tmp_path / "bad_side.json"
         path.write_text(json.dumps(scenario), encoding="utf-8")
@@ -241,7 +276,7 @@ class TestLoadScenarioFileMalformed:
     ) -> None:
         """Verify semantically invalid data raises ScenarioValidationError."""
         scenario = {
-            "schema_version": "1.0",
+            "schema_version": "2.0",
             "name": "bad_dim",
             "floor_plan": {
                 "width_m": -5.0, "height_m": 5.0,
@@ -250,7 +285,6 @@ class TestLoadScenarioFileMalformed:
                      "side": "south", "capacity_per_second": 1}
                 ],
             },
-            "agents": {"count": 1, "spawn_seed": 0},
         }
         path = tmp_path / "bad_dim.json"
         path.write_text(json.dumps(scenario), encoding="utf-8")
@@ -309,18 +343,6 @@ class TestLectureHallScenario:
         floor_plan, _ = load_bundled_scenario("lecture_hall")
         assert floor_plan.width_m == 50.0
         assert floor_plan.height_m == 30.0
-
-    def test_lecture_hall_agent_count_in_range(self) -> None:
-        """Verify agent count is between 50 and 300 as per requirements."""
-        _, data = load_bundled_scenario("lecture_hall")
-        count = data["agents"]["count"]
-        assert 50 <= count <= 300, f"Agent count {count} not in range [50, 300]"
-
-    def test_lecture_hall_has_spawn_seed(self) -> None:
-        """Verify spawn_seed is present for reproducibility (FR-6 R6.2)."""
-        _, data = load_bundled_scenario("lecture_hall")
-        assert "spawn_seed" in data["agents"]
-        assert isinstance(data["agents"]["spawn_seed"], int)
 
     def test_lecture_hall_exits_present(self) -> None:
         """Verify at least one exit exists (main exit required)."""
@@ -383,145 +405,52 @@ class TestLectureHallScenario:
             assert exit_.width_m > 0.0
             assert exit_.capacity_per_second > 0
 
-    def test_lecture_hall_simulation_config_present(self) -> None:
-        """Verify dt and max_ticks are set to sensible defaults."""
-        _, data = load_bundled_scenario("lecture_hall")
-        sim_config = data["simulation"]
-        assert "dt" in sim_config
-        assert sim_config["dt"] == 0.05, "Expected dt=0.05s (fixed timestep)"
-        assert "max_ticks" in sim_config
-        assert sim_config["max_ticks"] == 10000
-
 
 # ---------------------------------------------------------------------------
-# Emergency events block (Phase 2, Step 2.9) — optional scripted hazards
+# Bundled rooms — schema 2.0, room configuration only
 # ---------------------------------------------------------------------------
 
 
-def _scenario_with_events(
-    base: dict[str, object], events: object
-) -> dict[str, object]:
-    """Return a copy of *base* with its events block replaced by *events*."""
-    return {**base, "events": events}
+BUNDLED_ROOMS: tuple[str, ...] = (
+    "bottleneck_corridor",
+    "fixture_minimal",
+    "lecture_hall",
+    "lecture_hall_no_aisle",
+    "model_room_1",
+    "open_room_search",
+)
 
 
-class TestEventParsing:
-    """Validation and round-trip of the optional scenario events block."""
+class TestBundledRooms:
+    """Every shipped room is schema 2.0 and holds no run settings."""
 
-    def test_absent_events_default_to_empty(
-        self, scenario_file: Path
-    ) -> None:
-        """A scenario without an events key loads with an empty events list."""
-        _, data = load_scenario_file(scenario_file)
-        assert data.get("events", []) == []
-
-    def test_valid_event_round_trips(
-        self, tmp_path: Path, valid_scenario_dict: dict[str, object]
-    ) -> None:
-        """A well-formed event preserves tick, type, pos and optional fields."""
-        scenario = _scenario_with_events(
-            valid_scenario_dict,
-            [{
-                "tick": 120,
-                "type": "place_panic_source",
-                "pos": [5.0, 4.0],
-                "intensity": 0.8,
-                "source_type": "fire",
-            }],
+    def test_catalog_matches_expected_rooms(self) -> None:
+        """Verify the bundled room set (no hazard_lecture_hall, no _small)."""
+        from crowd_evac.adapters.io.scenario_catalog import (
+            list_bundled_scenarios,
         )
-        path = tmp_path / "with_event.json"
-        path.write_text(json.dumps(scenario), encoding="utf-8")
-        _, data = load_scenario_file(path)
-        events = data["events"]
-        assert len(events) == 1
-        event = events[0]
-        assert event["tick"] == 120
-        assert event["type"] == "place_panic_source"
-        assert event["pos"] == [5.0, 4.0]
-        assert event["intensity"] == 0.8
-        assert event["source_type"] == "fire"
 
-    def test_minimal_event_omits_optional_fields(
-        self, tmp_path: Path, valid_scenario_dict: dict[str, object]
-    ) -> None:
-        """An event with only the required keys carries no optional keys."""
-        scenario = _scenario_with_events(
-            valid_scenario_dict,
-            [{"tick": 0, "type": "place_panic_source", "pos": [1.0, 1.0]}],
+        assert sorted(list_bundled_scenarios()) == sorted(BUNDLED_ROOMS)
+
+    @pytest.mark.parametrize("name", BUNDLED_ROOMS)
+    def test_room_loads_as_2_0(self, name: str) -> None:
+        """Verify each room loads with schema 2.0 and its own name."""
+        _, data = load_bundled_scenario(name)
+        assert data["schema_version"] == "2.0"
+        assert data["name"] == name
+
+    @pytest.mark.parametrize("name", BUNDLED_ROOMS)
+    def test_room_file_has_only_room_keys(self, name: str) -> None:
+        """Verify the raw JSON holds only version, name and floor plan."""
+        from crowd_evac.adapters.io.scenario_catalog import SCENARIOS_DIR
+
+        raw = json.loads(
+            (SCENARIOS_DIR / f"{name}.json").read_text(encoding="utf-8")
         )
-        path = tmp_path / "minimal_event.json"
-        path.write_text(json.dumps(scenario), encoding="utf-8")
-        _, data = load_scenario_file(path)
-        event = data["events"][0]
-        assert "intensity" not in event
-        assert "radius" not in event
+        assert set(raw) == {"schema_version", "name", "floor_plan"}
 
-    def test_events_not_a_list_raises(
-        self, tmp_path: Path, valid_scenario_dict: dict[str, object]
-    ) -> None:
-        """A non-list events value raises MalformedScenarioError."""
-        scenario = _scenario_with_events(valid_scenario_dict, {"tick": 1})
-        path = tmp_path / "events_not_list.json"
-        path.write_text(json.dumps(scenario), encoding="utf-8")
-        with pytest.raises(MalformedScenarioError, match="events must be"):
-            load_scenario_file(path)
-
-    def test_unsupported_event_type_raises(
-        self, tmp_path: Path, valid_scenario_dict: dict[str, object]
-    ) -> None:
-        """An unknown event type raises MalformedScenarioError."""
-        scenario = _scenario_with_events(
-            valid_scenario_dict,
-            [{"tick": 1, "type": "detonate", "pos": [1.0, 1.0]}],
-        )
-        path = tmp_path / "bad_type.json"
-        path.write_text(json.dumps(scenario), encoding="utf-8")
-        with pytest.raises(MalformedScenarioError, match="unsupported type"):
-            load_scenario_file(path)
-
-    def test_negative_tick_raises(
-        self, tmp_path: Path, valid_scenario_dict: dict[str, object]
-    ) -> None:
-        """A negative firing tick raises MalformedScenarioError."""
-        scenario = _scenario_with_events(
-            valid_scenario_dict,
-            [{"tick": -5, "type": "place_panic_source", "pos": [1.0, 1.0]}],
-        )
-        path = tmp_path / "neg_tick.json"
-        path.write_text(json.dumps(scenario), encoding="utf-8")
-        with pytest.raises(MalformedScenarioError, match="tick must be >= 0"):
-            load_scenario_file(path)
-
-    def test_bad_pos_length_raises(
-        self, tmp_path: Path, valid_scenario_dict: dict[str, object]
-    ) -> None:
-        """A pos that is not a two-element list raises MalformedScenarioError."""
-        scenario = _scenario_with_events(
-            valid_scenario_dict,
-            [{"tick": 1, "type": "place_panic_source", "pos": [1.0]}],
-        )
-        path = tmp_path / "bad_pos.json"
-        path.write_text(json.dumps(scenario), encoding="utf-8")
-        with pytest.raises(MalformedScenarioError, match="pos must be"):
-            load_scenario_file(path)
-
-    def test_missing_required_event_field_raises(
-        self, tmp_path: Path, valid_scenario_dict: dict[str, object]
-    ) -> None:
-        """An event missing pos raises MalformedScenarioError."""
-        scenario = _scenario_with_events(
-            valid_scenario_dict,
-            [{"tick": 1, "type": "place_panic_source"}],
-        )
-        path = tmp_path / "missing_pos.json"
-        path.write_text(json.dumps(scenario), encoding="utf-8")
-        with pytest.raises(MalformedScenarioError, match="pos"):
-            load_scenario_file(path)
-
-    def test_hazard_lecture_hall_bundled_event_loads(self) -> None:
-        """The bundled hazard_lecture_hall carries one place_panic_source event."""
-        _, data = load_bundled_scenario("hazard_lecture_hall")
-        events = data["events"]
-        assert len(events) == 1
-        assert events[0]["type"] == "place_panic_source"
-        assert events[0]["tick"] == 100
+    def test_no_aisle_room_has_lecture_hall_footprint(self) -> None:
+        """Verify the renamed room keeps its 50 x 30 m geometry."""
+        floor_plan, _ = load_bundled_scenario("lecture_hall_no_aisle")
+        assert (floor_plan.width_m, floor_plan.height_m) == (50.0, 30.0)
+        assert len(floor_plan.obstacles) == 5

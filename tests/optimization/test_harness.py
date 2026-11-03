@@ -11,6 +11,7 @@ Covers:
 from __future__ import annotations
 
 import json
+from functools import partial
 from pathlib import Path
 
 import numpy as np
@@ -19,21 +20,30 @@ import pytest
 from crowd_evac.domain.params import ForceParams
 from crowd_evac.optimization.harness import (
     RunResult,
-    _events_by_tick,
     _load_scenario,
     evaluate,
     evaluate_batch,
     rerouted_flow_field,
 )
+from crowd_evac.optimization.select import (
+    HAZARD_VALIDATION_EVENTS,
+    HAZARD_VALIDATION_SCENARIO,
+)
 from crowd_evac.pathfinding.flow_field import FlowField
+from crowd_evac.scenarios.schema import EmergencyEventData
 
 # ---------------------------------------------------------------------------
 # Constants shared across tests
 # ---------------------------------------------------------------------------
 
-_SCENARIO = "fixture_minimal"  # 50 agents, 10 m × 8 m room, one exit
+_SCENARIO = "fixture_minimal"  # 10 m × 8 m room, one exit
+_COUNT = 50  # agents spawned in fixture_minimal runs
 _SEED = 42
 _SMALL_MAX_TICKS = 5  # guaranteed to hit the cap for any non-trivial scenario
+
+# agent_count is a required keyword (scenario files carry no population).
+_evaluate = partial(evaluate, agent_count=_COUNT)
+_evaluate_batch = partial(evaluate_batch, agent_count=_COUNT)
 
 
 # ---------------------------------------------------------------------------
@@ -47,7 +57,7 @@ class TestRunResultStructure:
     @pytest.fixture(scope="class")
     def result(self) -> RunResult:
         """Single evaluate() call shared across tests in this class."""
-        return evaluate(ForceParams.defaults(), _SCENARIO, _SEED)
+        return _evaluate(ForceParams.defaults(), _SCENARIO, _SEED)
 
     def test_evac_time_is_non_negative_float(self, result: RunResult) -> None:
         """evac_time is a non-negative float."""
@@ -133,23 +143,23 @@ class TestEvaluateHappyPath:
 
     def test_returns_run_result_instance(self) -> None:
         """evaluate() returns a RunResult."""
-        result = evaluate(ForceParams.defaults(), _SCENARIO, _SEED)
+        result = _evaluate(ForceParams.defaults(), _SCENARIO, _SEED)
         assert isinstance(result, RunResult)
 
     def test_default_params_not_terminal(self) -> None:
         """Default params complete before the default tick cap."""
-        result = evaluate(ForceParams.defaults(), _SCENARIO, _SEED)
+        result = _evaluate(ForceParams.defaults(), _SCENARIO, _SEED)
         assert not result.is_terminal
 
     def test_evac_fraction_positive(self) -> None:
         """Some agents evacuate under default params."""
-        result = evaluate(ForceParams.defaults(), _SCENARIO, _SEED)
+        result = _evaluate(ForceParams.defaults(), _SCENARIO, _SEED)
         assert result.evacuated_fraction > 0.0
 
     def test_custom_history_interval_respected(self) -> None:
         """history_interval=20 produces fewer samples than the default 10."""
-        r_default = evaluate(ForceParams.defaults(), _SCENARIO, _SEED)
-        r_sparse = evaluate(
+        r_default = _evaluate(ForceParams.defaults(), _SCENARIO, _SEED)
+        r_sparse = _evaluate(
             ForceParams.defaults(), _SCENARIO, _SEED, history_interval=20
         )
         # Tick 0 is always included; after that every 20 vs 10 ticks.
@@ -158,7 +168,7 @@ class TestEvaluateHappyPath:
     def test_sample_ticks_are_multiples_of_interval(self) -> None:
         """Non-initial sample ticks are multiples of history_interval."""
         interval = 5
-        result = evaluate(
+        result = _evaluate(
             ForceParams.defaults(), _SCENARIO, _SEED, history_interval=interval
         )
         for tick in result.sample_ticks[1:]:
@@ -166,7 +176,7 @@ class TestEvaluateHappyPath:
 
     def test_throughput_series_sums_to_evacuated_count(self) -> None:
         """Sum of per-tick egress matches evacuated_count × initial_count."""
-        result = evaluate(ForceParams.defaults(), _SCENARIO, _SEED)
+        result = _evaluate(ForceParams.defaults(), _SCENARIO, _SEED)
         expected = round(result.evacuated_fraction * result.initial_count)
         actual = sum(result.throughput_series)
         assert actual == expected
@@ -183,12 +193,12 @@ class TestEvaluateReproducibility:
     @pytest.fixture(scope="class")
     def run_a(self) -> RunResult:
         """First run."""
-        return evaluate(ForceParams.defaults(), _SCENARIO, _SEED)
+        return _evaluate(ForceParams.defaults(), _SCENARIO, _SEED)
 
     @pytest.fixture(scope="class")
     def run_b(self) -> RunResult:
         """Second run — same args, independent call."""
-        return evaluate(ForceParams.defaults(), _SCENARIO, _SEED)
+        return _evaluate(ForceParams.defaults(), _SCENARIO, _SEED)
 
     def test_scalar_fields_identical(
         self, run_a: RunResult, run_b: RunResult
@@ -213,8 +223,8 @@ class TestEvaluateReproducibility:
 
     def test_different_seed_may_differ(self) -> None:
         """Different seeds can produce different evacuation times."""
-        r1 = evaluate(ForceParams.defaults(), _SCENARIO, seed=1)
-        r2 = evaluate(ForceParams.defaults(), _SCENARIO, seed=99)
+        r1 = _evaluate(ForceParams.defaults(), _SCENARIO, seed=1)
+        r2 = _evaluate(ForceParams.defaults(), _SCENARIO, seed=99)
         # Seeds could theoretically collide, but it is astronomically unlikely.
         # We test that at minimum the function returns valid RunResults.
         assert isinstance(r1, RunResult)
@@ -231,21 +241,21 @@ class TestEvaluateCapBehaviour:
 
     def test_small_max_ticks_sets_is_terminal(self) -> None:
         """max_ticks=5 marks the result as terminal for a 50-agent scenario."""
-        result = evaluate(
+        result = _evaluate(
             ForceParams.defaults(), _SCENARIO, _SEED, max_ticks=_SMALL_MAX_TICKS
         )
         assert result.is_terminal
 
     def test_total_ticks_does_not_exceed_cap(self) -> None:
         """total_ticks never exceeds max_ticks."""
-        result = evaluate(
+        result = _evaluate(
             ForceParams.defaults(), _SCENARIO, _SEED, max_ticks=_SMALL_MAX_TICKS
         )
         assert result.total_ticks <= _SMALL_MAX_TICKS
 
     def test_terminal_run_still_returns_run_result(self) -> None:
         """A capped run returns a fully-populated RunResult, not an exception."""
-        result = evaluate(
+        result = _evaluate(
             ForceParams.defaults(), _SCENARIO, _SEED, max_ticks=_SMALL_MAX_TICKS
         )
         assert isinstance(result, RunResult)
@@ -254,7 +264,7 @@ class TestEvaluateCapBehaviour:
     def test_terminal_evac_time_equals_sim_time_at_cap(self) -> None:
         """When no egress occurs before the cap, evac_time == sim_time at cap."""
         # Force cap before any egress by using a very tight tick limit.
-        result = evaluate(
+        result = _evaluate(
             ForceParams.defaults(), _SCENARIO, _SEED, max_ticks=1
         )
         if result.is_terminal and sum(result.throughput_series) == 0:
@@ -274,7 +284,7 @@ class TestEvaluateBatch:
         """N candidates × M seeds → N×M RunResult entries."""
         candidates = [ForceParams.defaults()] * 2
         seeds = [42, 43, 44]
-        results = evaluate_batch(
+        results = _evaluate_batch(
             candidates, _SCENARIO, seeds, max_ticks=_SMALL_MAX_TICKS
         )
         assert len(results) == len(candidates) * len(seeds)
@@ -283,21 +293,21 @@ class TestEvaluateBatch:
         """Every element of the returned list is a RunResult."""
         candidates = [ForceParams.defaults()] * 3
         seeds = [10, 20]
-        results = evaluate_batch(
+        results = _evaluate_batch(
             candidates, _SCENARIO, seeds, max_ticks=_SMALL_MAX_TICKS
         )
         assert all(isinstance(r, RunResult) for r in results)
 
     def test_row_major_ordering_matches_serial(self) -> None:
-        """Result at index i*len(seeds)+j matches serial evaluate(cand[i], seed[j])."""
+        """Result at index i*len(seeds)+j matches serial _evaluate(cand[i], seed[j])."""
         candidates = [ForceParams.defaults(), ForceParams.defaults()]
         seeds = [1, 2]
-        batch = evaluate_batch(
+        batch = _evaluate_batch(
             candidates, _SCENARIO, seeds, max_ticks=_SMALL_MAX_TICKS, max_workers=1
         )
         for i, p in enumerate(candidates):
             for j, s in enumerate(seeds):
-                serial = evaluate(p, _SCENARIO, s, max_ticks=_SMALL_MAX_TICKS)
+                serial = _evaluate(p, _SCENARIO, s, max_ticks=_SMALL_MAX_TICKS)
                 batch_result = batch[i * len(seeds) + j]
                 assert batch_result.evac_time == serial.evac_time
                 assert batch_result.total_ticks == serial.total_ticks
@@ -305,12 +315,12 @@ class TestEvaluateBatch:
     def test_raises_on_empty_candidates(self) -> None:
         """ValueError raised when candidates list is empty."""
         with pytest.raises(ValueError, match="candidates must be non-empty"):
-            evaluate_batch([], _SCENARIO, [42])
+            _evaluate_batch([], _SCENARIO, [42])
 
     def test_raises_on_empty_seeds(self) -> None:
         """ValueError raised when seeds list is empty."""
         with pytest.raises(ValueError, match="seeds must be non-empty"):
-            evaluate_batch([ForceParams.defaults()], _SCENARIO, [])
+            _evaluate_batch([ForceParams.defaults()], _SCENARIO, [])
 
 
 # ---------------------------------------------------------------------------
@@ -330,7 +340,7 @@ class TestLoadScenario:
         """A Path argument loads a scenario file from the filesystem."""
         # Write a minimal valid scenario to a temp file.
         data = {
-            "schema_version": "1.0",
+            "schema_version": "2.0",
             "name": "tmp_test",
             "floor_plan": {
                 "width_m": 10.0,
@@ -348,7 +358,6 @@ class TestLoadScenario:
                     }
                 ],
             },
-            "agents": {"count": 5, "spawn_seed": 7},
         }
         scenario_file = tmp_path / "tmp_test.json"
         scenario_file.write_text(json.dumps(data), encoding="utf-8")
@@ -362,14 +371,20 @@ class TestLoadScenario:
 
 
 # ---------------------------------------------------------------------------
-# Scripted emergency-event injection (Phase 2, Step 2.9)
+# agent_count and events are run-time input
 # ---------------------------------------------------------------------------
 
 
-def _scenario_with_event(tick: int, pos: list[float]) -> dict[str, object]:
-    """Build a minimal scenario dict carrying one place_panic_source event."""
-    return {
-        "schema_version": "1.0",
+def _event(tick: int, pos: list[float]) -> EmergencyEventData:
+    """Build one place_panic_source event."""
+    return {"tick": tick, "type": "place_panic_source", "pos": pos}
+
+
+@pytest.fixture
+def hazard_room(tmp_path: Path) -> Path:
+    """Write a small 12 x 8 m room (no agents, no events) and return its path."""
+    data = {
+        "schema_version": "2.0",
         "name": "tmp_hazard",
         "floor_plan": {
             "width_m": 12.0,
@@ -381,51 +396,62 @@ def _scenario_with_event(tick: int, pos: list[float]) -> dict[str, object]:
                  "capacity_per_second": 10, "label": "main"},
             ],
         },
-        "agents": {"count": 6, "spawn_seed": 7},
-        "simulation": {"dt": 0.05, "max_ticks": 5000},
-        "events": [
-            {"tick": tick, "type": "place_panic_source", "pos": pos},
-        ],
     }
+    path = tmp_path / "hazard.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    return path
 
 
-class TestEventsByTick:
-    """_events_by_tick grouping behaviour."""
+class TestAgentCount:
+    """agent_count is required and sets the population."""
 
-    def test_empty_events_yield_empty_map(self) -> None:
-        """No events produce an empty schedule."""
-        assert _events_by_tick([]) == {}
+    @pytest.mark.parametrize("count", [1, 7, 20])
+    def test_agent_count_sets_initial_count(self, count: int) -> None:
+        """The spawned population equals the requested count."""
+        result = evaluate(
+            ForceParams.defaults(), _SCENARIO, _SEED,
+            max_ticks=_SMALL_MAX_TICKS, agent_count=count,
+        )
+        assert result.initial_count == count
+        assert result.positions_history.shape[1] == count
 
-    def test_groups_by_tick(self) -> None:
-        """Events are grouped under their firing tick."""
-        events = [
-            {"tick": 5, "type": "place_panic_source", "pos": [1.0, 1.0]},
-            {"tick": 5, "type": "place_panic_source", "pos": [2.0, 2.0]},
-            {"tick": 9, "type": "place_panic_source", "pos": [3.0, 3.0]},
-        ]
-        grouped = _events_by_tick(events)  # type: ignore[arg-type]
-        assert set(grouped) == {5, 9}
-        assert len(grouped[5]) == 2
-        assert len(grouped[9]) == 1
+    def test_missing_agent_count_raises_type_error(self) -> None:
+        """Omitting agent_count is a TypeError, not a silent default."""
+        with pytest.raises(TypeError, match="agent_count"):
+            evaluate(  # type: ignore[call-arg]
+                ForceParams.defaults(), _SCENARIO, _SEED
+            )
 
-    def test_preserves_listed_order_within_tick(self) -> None:
-        """Events on the same tick keep their file order."""
-        events = [
-            {"tick": 1, "type": "place_panic_source", "pos": [1.0, 1.0]},
-            {"tick": 1, "type": "place_panic_source", "pos": [2.0, 2.0]},
-        ]
-        grouped = _events_by_tick(events)  # type: ignore[arg-type]
-        assert grouped[1][0]["pos"] == [1.0, 1.0]
-        assert grouped[1][1]["pos"] == [2.0, 2.0]
+    def test_batch_requires_agent_count(self) -> None:
+        """evaluate_batch also refuses to guess a population."""
+        with pytest.raises(TypeError, match="agent_count"):
+            evaluate_batch(  # type: ignore[call-arg]
+                [ForceParams.defaults()], _SCENARIO, [1]
+            )
+
+    def test_batch_forwards_agent_count(self) -> None:
+        """Every batch run spawns the requested population."""
+        results = evaluate_batch(
+            [ForceParams.defaults()], _SCENARIO, [1, 2],
+            max_ticks=_SMALL_MAX_TICKS, max_workers=1, agent_count=9,
+        )
+        assert [r.initial_count for r in results] == [9, 9]
+
+    def test_same_inputs_give_identical_results(self) -> None:
+        """Same params, seed, count and events reproduce positions exactly."""
+        args = (ForceParams.defaults(), _SCENARIO, _SEED)
+        r1 = evaluate(*args, max_ticks=30, agent_count=12)
+        r2 = evaluate(*args, max_ticks=30, agent_count=12)
+        assert np.array_equal(r1.positions_history, r2.positions_history)
 
 
 class TestEventInjection:
-    """evaluate() fires scenario events through add_panic_source."""
+    """evaluate() fires the events it is given through add_panic_source."""
 
     def test_event_triggers_injection(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, hazard_room: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A scenario event invokes add_panic_source once at its tick."""
+        """An event invokes add_panic_source once at its tick."""
         calls: list[tuple[str, tuple[float, float]]] = []
 
         def _spy(sim: object, source_type: str,
@@ -433,59 +459,92 @@ class TestEventInjection:
             calls.append((source_type, pos))
 
         monkeypatch.setattr(
-            "crowd_evac.optimization.harness.add_panic_source", _spy
+            "crowd_evac.application.injection.add_panic_source", _spy
         )
-        scenario = tmp_path / "hazard.json"
-        scenario.write_text(
-            json.dumps(_scenario_with_event(2, [6.0, 4.0])), encoding="utf-8"
+        evaluate(
+            ForceParams.defaults(), hazard_room, _SEED, max_ticks=20,
+            agent_count=6, events=[_event(2, [6.0, 4.0])],
         )
-        evaluate(ForceParams.defaults(), scenario, _SEED, max_ticks=20)
-        assert len(calls) == 1
-        assert calls[0][0] == "fire"
-        assert calls[0][1] == (6.0, 4.0)
+        assert calls == [("fire", (6.0, 4.0))]
 
-    def test_event_before_cap_not_fired(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    def test_event_after_cap_not_fired(
+        self, hazard_room: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """An event scheduled past the tick cap never fires."""
         calls: list[object] = []
         monkeypatch.setattr(
-            "crowd_evac.optimization.harness.add_panic_source",
+            "crowd_evac.application.injection.add_panic_source",
             lambda *a, **k: calls.append(1),
         )
-        scenario = tmp_path / "late_hazard.json"
-        scenario.write_text(
-            json.dumps(_scenario_with_event(500, [6.0, 4.0])), encoding="utf-8"
+        evaluate(
+            ForceParams.defaults(), hazard_room, _SEED, max_ticks=5,
+            agent_count=6, events=[_event(500, [6.0, 4.0])],
         )
-        evaluate(ForceParams.defaults(), scenario, _SEED, max_ticks=5)
         assert calls == []
 
-    def test_event_run_is_deterministic(self, tmp_path: Path) -> None:
-        """Same seed + scenario events → identical RunResult (positions)."""
-        scenario = tmp_path / "det_hazard.json"
-        scenario.write_text(
-            json.dumps(_scenario_with_event(1, [6.0, 4.0])), encoding="utf-8"
+    def test_no_events_means_no_injection(
+        self, hazard_room: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Without events the injector is never called."""
+        calls: list[object] = []
+        monkeypatch.setattr(
+            "crowd_evac.application.injection.add_panic_source",
+            lambda *a, **k: calls.append(1),
         )
-        r1 = evaluate(ForceParams.defaults(), scenario, _SEED, max_ticks=30)
-        r2 = evaluate(ForceParams.defaults(), scenario, _SEED, max_ticks=30)
+        evaluate(
+            ForceParams.defaults(), hazard_room, _SEED, max_ticks=10,
+            agent_count=6,
+        )
+        assert calls == []
+
+    def test_event_run_is_deterministic(self, hazard_room: Path) -> None:
+        """Same seed + events -> identical RunResult (positions)."""
+        kwargs = {"max_ticks": 30, "agent_count": 6,
+                  "events": [_event(1, [6.0, 4.0])]}
+        r1 = evaluate(ForceParams.defaults(), hazard_room, _SEED, **kwargs)
+        r2 = evaluate(ForceParams.defaults(), hazard_room, _SEED, **kwargs)
         assert r1.evac_time == r2.evac_time
         assert np.array_equal(r1.positions_history, r2.positions_history)
 
+    def test_events_change_the_run(self, hazard_room: Path) -> None:
+        """A hazard on the exit approach alters the trajectory."""
+        base = evaluate(
+            ForceParams.defaults(), hazard_room, _SEED, max_ticks=40,
+            agent_count=6,
+        )
+        hot = evaluate(
+            ForceParams.defaults(), hazard_room, _SEED, max_ticks=40,
+            agent_count=6, events=[_event(0, [10.0, 4.0])],
+        )
+        assert not np.array_equal(base.positions_history, hot.positions_history)
+
 
 class TestRerouteFlowField:
-    """rerouted_flow_field reflects scenario hazard blocks."""
+    """rerouted_flow_field reflects the hazards it is given."""
 
-    def test_hazard_scenario_blocks_cells(self) -> None:
-        """The hazard scenario re-routes: its field blocks cells the base does not."""
+    def test_hazard_blocks_cells(self) -> None:
+        """The validation hazard blocks cells the base field does not."""
         params = ForceParams.defaults()
-        floor_plan, _ = _load_scenario("hazard_lecture_hall")
+        floor_plan, _ = _load_scenario(HAZARD_VALIDATION_SCENARIO)
         base = FlowField.build(floor_plan)
-        rerouted = rerouted_flow_field("hazard_lecture_hall", params)
+        rerouted = rerouted_flow_field(
+            HAZARD_VALIDATION_SCENARIO, params,
+            agent_count=5, events=HAZARD_VALIDATION_EVENTS,
+        )
         assert len(rerouted.blocked) > len(base.blocked)
 
-    def test_event_free_scenario_matches_base(self) -> None:
-        """A scenario with no events yields a field with no extra blocks."""
+    def test_no_events_matches_base(self) -> None:
+        """With no events the field has no extra blocks."""
         floor_plan, _ = _load_scenario("lecture_hall")
         base = FlowField.build(floor_plan)
-        rerouted = rerouted_flow_field("lecture_hall", ForceParams.defaults())
+        rerouted = rerouted_flow_field(
+            "lecture_hall", ForceParams.defaults(), agent_count=5
+        )
         assert len(rerouted.blocked) == len(base.blocked)
+
+    def test_requires_agent_count(self) -> None:
+        """agent_count is a required keyword here too."""
+        with pytest.raises(TypeError, match="agent_count"):
+            rerouted_flow_field(  # type: ignore[call-arg]
+                "lecture_hall", ForceParams.defaults()
+            )

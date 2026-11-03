@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.0",
+  "schema_version": "2.0",
   "name": "fixture_minimal",
   "floor_plan": {
     "width_m": 10.0,
@@ -14,22 +14,7 @@
       {"x": 3.0, "y": 3.0, "width": 2.0, "height": 1.0, "label": "obstacle_1"}
     ],
     "exits": [
-      {
-        "x": 5.0,
-        "y": 0.25,
-        "width_m": 1.5,
-        "side": "south",
-        "capacity_per_second": 5,
-        "label": "main_exit"
-      }
+      {"x": 5.0, "y": 0.25, "width_m": 1.5, "side": "south", "capacity_per_second": 5, "label": "main_exit"}
     ]
-  },
-  "agents": {
-    "count": 50,
-    "spawn_seed": 42
-  },
-  "simulation": {
-    "dt": 0.05,
-    "max_ticks": 5000
   }
 }

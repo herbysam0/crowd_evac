@@ -30,6 +30,7 @@ All mutations are routed through the
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 
 from crowd_evac.application.simulation import Simulation
 from crowd_evac.domain.constants import (
@@ -43,6 +44,7 @@ from crowd_evac.ports.input_source import (
     MovePanicSourceEvent,
     PlacePanicSourceEvent,
 )
+from crowd_evac.scenarios.schema import EmergencyEventData
 
 logger = logging.getLogger(__name__)
 
@@ -259,3 +261,63 @@ def process_input_events(
                 decay_rate=decay_rate,
             )
     return current_source
+
+
+def events_by_tick(
+    events: Iterable[EmergencyEventData],
+) -> dict[int, list[EmergencyEventData]]:
+    """Group scripted events by their firing tick, preserving given order.
+
+    Args:
+        events: Scripted emergency events (possibly empty).
+
+    Returns:
+        Mapping of firing tick to the events scheduled at that tick, in the
+        order supplied.  Empty when ``events`` is empty.
+    """
+    by_tick: dict[int, list[EmergencyEventData]] = {}
+    for event in events:
+        by_tick.setdefault(event["tick"], []).append(event)
+    return by_tick
+
+
+def apply_event(sim: Simulation, event: EmergencyEventData) -> None:
+    """Translate one scripted event into a panic-source injection.
+
+    Optional event fields fall back to the same domain-constant defaults used
+    by :func:`add_panic_source`, so an event that specifies only
+    ``tick``/``type``/``pos`` reproduces a default-strength hazard.
+
+    Args:
+        sim: Running simulation to inject into.
+        event: A single emergency event.
+
+    Raises:
+        ValueError: If a value is outside the range
+            :class:`~crowd_evac.domain.panic_source.PanicSource` accepts.
+    """
+    pos = (event["pos"][0], event["pos"][1])
+    add_panic_source(
+        sim,
+        event.get("source_type", "fire"),
+        pos,
+        intensity=event.get("intensity", 1.0),
+        radius=event.get("radius", PANIC_RANGE),
+        block_radius=event.get("block_radius", HAZARD_BLOCK_RADIUS),
+        decay_rate=event.get("decay_rate", PANIC_DECAY_RATE),
+        block_cells=event.get("blocks_navigation", True),
+    )
+
+
+def apply_due_events(
+    sim: Simulation,
+    schedule: dict[int, list[EmergencyEventData]],
+) -> None:
+    """Inject every event scheduled for the simulation's current tick.
+
+    Args:
+        sim: Running simulation; mutated in-place by each injection.
+        schedule: Tick-grouped schedule from :func:`events_by_tick`.
+    """
+    for event in schedule.get(sim.tick, ()):
+        apply_event(sim, event)

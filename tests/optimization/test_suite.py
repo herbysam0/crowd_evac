@@ -7,7 +7,7 @@ Covers:
     scenario_ref loads and starts via the harness without error.
   - calibration_rigs(): non-empty, positive door widths, bottleneck_corridor
     present, loads via harness, produces measurable egress.
-  - Timing: down-scaled lecture_hall_small evaluates faster than the
+  - Timing: down-scaled lecture_hall_no_aisle evaluates faster than the
     full-scale lecture_hall under an equal tick cap (lenient bound).
   - Parallel batch: evaluate_batch across all suite scenarios × multiple seeds
     using all available CPU cores returns correct result count and is faster
@@ -145,6 +145,15 @@ class TestSearchSuite:
         names = [s.name for s in search_suite()]
         assert len(names) == len(set(names))
 
+    def test_agent_counts_are_the_agreed_values(self) -> None:
+        """The suite owns the population: 30 and 25 agents."""
+        counts = {s.name: s.agent_count for s in search_suite()}
+        assert counts == {"lecture_hall_no_aisle": 30, "open_room_search": 25}
+
+    def test_old_lecture_hall_small_name_is_gone(self) -> None:
+        """The renamed room no longer appears under its old name."""
+        assert "lecture_hall_small" not in {s.name for s in search_suite()}
+
     def test_all_full_agent_counts_positive(self) -> None:
         """Every entry has a positive full_agent_count."""
         for s in search_suite():
@@ -160,6 +169,7 @@ class TestSearchSuite:
                 scenario.scenario_ref,
                 _SEED,
                 max_ticks=_TINY_MAX_TICKS,
+                agent_count=scenario.agent_count,
             )
             # Cap forces is_terminal=True; confirms the scenario loaded cleanly.
             assert result.is_terminal
@@ -172,17 +182,18 @@ class TestSearchSuite:
                 scenario.scenario_ref,
                 _SEED,
                 max_ticks=_TINY_MAX_TICKS,
+                agent_count=scenario.agent_count,
             )
             assert isinstance(result, RunResult)
 
-    def test_lecture_hall_small_has_fewer_agents_than_full(self) -> None:
-        """lecture_hall_small full_agent_count > search agent count in the JSON.
+    def test_lecture_hall_no_aisle_has_fewer_agents_than_full(self) -> None:
+        """lecture_hall_no_aisle full_agent_count > search agent count in the JSON.
 
         Verifies the full_agent_count metadata reflects the full-scale scenario
         (150) while the actual scenario file has a reduced count (30).
         """
         small = next(
-            s for s in search_suite() if s.name == "lecture_hall_small"
+            s for s in search_suite() if s.name == "lecture_hall_no_aisle"
         )
         # full_agent_count is the full-scale reference; the scenario file has
         # fewer agents (the down-scale ratio).  30 < 150.
@@ -191,7 +202,9 @@ class TestSearchSuite:
             small.scenario_ref,
             _SEED,
             max_ticks=_TINY_MAX_TICKS,
+            agent_count=small.agent_count,
         )
+        assert result.initial_count == small.agent_count
         assert result.initial_count < small.full_agent_count
 
 
@@ -220,6 +233,13 @@ class TestCalibrationRigs:
                 f"{rig.name!r} has non-positive door_width_m={rig.door_width_m}"
             )
 
+    def test_bottleneck_rig_agent_count_is_60(self) -> None:
+        """The bottleneck rig spawns 60 agents to sustain a queue."""
+        rig = next(
+            r for r in calibration_rigs() if r.name == "bottleneck_corridor"
+        )
+        assert rig.agent_count == 60
+
     def test_bottleneck_corridor_rig_is_present(self) -> None:
         """The 'bottleneck_corridor' rig exists in the returned list."""
         names = {r.name for r in calibration_rigs()}
@@ -242,6 +262,7 @@ class TestCalibrationRigs:
             bottleneck.scenario_ref,
             _SEED,
             max_ticks=_TINY_MAX_TICKS,
+            agent_count=bottleneck.agent_count,
         )
         assert result.is_terminal  # cap confirms load, not hang
 
@@ -261,6 +282,7 @@ class TestCalibrationRigs:
             bottleneck.scenario_ref,
             _SEED,
             max_ticks=2000,
+            agent_count=bottleneck.agent_count,
         )
         assert result.evacuated_fraction > 0.0, (
             "bottleneck_corridor should evacuate some agents within 2000 ticks "
@@ -274,10 +296,10 @@ class TestCalibrationRigs:
 
 
 class TestDownScaleFaster:
-    """lecture_hall_small evaluates faster than the full-scale lecture_hall."""
+    """lecture_hall_no_aisle evaluates faster than the full-scale lecture_hall."""
 
     def test_small_scenario_faster_than_full(self) -> None:
-        """lecture_hall_small wall-clock time < lecture_hall under equal tick cap.
+        """lecture_hall_no_aisle wall-clock time < lecture_hall under equal tick cap.
 
         Lenient bound: any measurable speedup is sufficient.  Theory: at
         30 vs 150 agents the per-tick cost is O(N^2) for pairwise forces,
@@ -287,15 +309,21 @@ class TestDownScaleFaster:
         params = ForceParams.defaults()
 
         t0 = time.monotonic()
-        evaluate(params, "lecture_hall_small", _SEED, max_ticks=tick_cap)
+        evaluate(
+            params, "lecture_hall_no_aisle", _SEED, max_ticks=tick_cap,
+            agent_count=30,
+        )
         small_wall_s = time.monotonic() - t0
 
         t1 = time.monotonic()
-        evaluate(params, "lecture_hall", _SEED, max_ticks=tick_cap)
+        evaluate(
+            params, "lecture_hall", _SEED, max_ticks=tick_cap,
+            agent_count=150,
+        )
         full_wall_s = time.monotonic() - t1
 
         assert small_wall_s < full_wall_s, (
-            f"lecture_hall_small ({small_wall_s:.3f} s) should be faster than "
+            f"lecture_hall_no_aisle ({small_wall_s:.3f} s) should be faster than "
             f"lecture_hall ({full_wall_s:.3f} s) under {tick_cap}-tick cap"
         )
 
@@ -329,6 +357,7 @@ class TestParallelBatchAcrossSuite:
                 scenario.scenario_ref,
                 self._SEEDS,
                 max_ticks=self._TICK_CAP,
+                agent_count=scenario.agent_count,
             )
             all_results.extend(batch)
 
@@ -342,6 +371,7 @@ class TestParallelBatchAcrossSuite:
                 scenario.scenario_ref,
                 self._SEEDS,
                 max_ticks=self._TICK_CAP,
+                agent_count=scenario.agent_count,
             )
             assert all(isinstance(r, RunResult) for r in batch)
 
@@ -374,6 +404,7 @@ class TestParallelBatchAcrossSuite:
                 scenario.scenario_ref,
                 seeds,
                 max_ticks=self._TICK_CAP,
+                agent_count=scenario.agent_count,
                 max_workers=None,
             )
             elapsed = time.monotonic() - t0

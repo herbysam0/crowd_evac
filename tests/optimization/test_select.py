@@ -22,6 +22,9 @@ import pytest
 from crowd_evac.domain.params import ForceParams
 from crowd_evac.optimization.fitness import FitnessConfig, FitnessResult
 from crowd_evac.optimization.select import (
+    HAZARD_VALIDATION_AGENT_COUNT,
+    HAZARD_VALIDATION_EVENTS,
+    HAZARD_VALIDATION_SCENARIO,
     HazardCheckResult,
     LoadedFrontPoint,
     RejectedPoint,
@@ -323,6 +326,54 @@ class TestHazardCheck:
         with pytest.raises(ValueError, match="seeds must be non-empty"):
             hazard_check(ForceParams.defaults(), seeds=())
 
+    def test_forwards_count_and_events_to_harness(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Both harness calls get the 150-agent count and the fire event."""
+        seen: list[dict[str, object]] = []
+
+        def _field(*a: object, **k: object) -> object:
+            seen.append(k)
+            return object()
+
+        class _Run:
+            evacuated_fraction = 1.0
+
+        def _batch(*a: object, **k: object) -> list[_Run]:
+            seen.append(k)
+            return [_Run()]
+
+        monkeypatch.setattr(f"{_SELECT}.rerouted_flow_field", _field)
+        monkeypatch.setattr(f"{_SELECT}.evaluate_batch", _batch)
+        monkeypatch.setattr(f"{_SELECT}.stuck_count", lambda r, f: 0)
+        hazard_check(ForceParams.defaults(), seeds=(101,))
+        assert len(seen) == 2
+        for kwargs in seen:
+            assert kwargs["agent_count"] == HAZARD_VALIDATION_AGENT_COUNT
+            assert kwargs["events"] == HAZARD_VALIDATION_EVENTS
+
+
+class TestHazardConstants:
+    """The scripted fire that replaced hazard_lecture_hall.json."""
+
+    def test_scenario_is_the_renamed_room(self) -> None:
+        """Hazard validation runs in lecture_hall_no_aisle."""
+        assert HAZARD_VALIDATION_SCENARIO == "lecture_hall_no_aisle"
+
+    def test_agent_count_is_150(self) -> None:
+        """Full Tier-A scale."""
+        assert HAZARD_VALIDATION_AGENT_COUNT == 150
+
+    def test_event_matches_the_old_file(self) -> None:
+        """One fire at tick 100, (25, 3.5), intensity 1.0."""
+        assert len(HAZARD_VALIDATION_EVENTS) == 1
+        event = HAZARD_VALIDATION_EVENTS[0]
+        assert event["tick"] == 100
+        assert event["type"] == "place_panic_source"
+        assert event["pos"] == [25.0, 3.5]
+        assert event["intensity"] == 1.0
+        assert event["source_type"] == "fire"
+
 
 # ---------------------------------------------------------------------------
 # select_and_validate
@@ -510,7 +561,7 @@ class TestWriteOutcome:
             chosen=point.params,
             chosen_point=point,
             validation=vr,
-            hazard=HazardCheckResult("hazard_lecture_hall", 0, 0.98, 0.95),
+            hazard=HazardCheckResult("lecture_hall_no_aisle", 0, 0.98, 0.95),
             knee=point,
             rejected=(
                 RejectedPoint(rejected_pt, rej_vr, None, "stuck regressed"),
@@ -526,7 +577,7 @@ class TestWriteOutcome:
         assert payload["threshold"] == 0.15
         assert "relaxation_time" in payload["chosen_params"]
         assert payload["validation"]["passed"] is True
-        assert payload["hazard"]["scenario"] == "hazard_lecture_hall"
+        assert payload["hazard"]["scenario"] == "lecture_hall_no_aisle"
         assert payload["n_rejected"] == 1
 
     def test_creates_parent_dirs(self, tmp_path: Path) -> None:
@@ -550,6 +601,11 @@ class TestValidationConfig:
         assert "lecture_hall" in names
         hall = next(s for s in validation_suite() if s.name == "lecture_hall")
         assert hall.full_agent_count == 150
+        assert hall.agent_count == 150
+        open_room = next(
+            s for s in validation_suite() if s.name == "open_room_search"
+        )
+        assert open_room.agent_count == 25
 
     def test_config_seeds_disjoint_from_search(self) -> None:
         """Held-out validation seeds do not overlap the default search seeds."""

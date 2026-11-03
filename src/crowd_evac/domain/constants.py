@@ -226,6 +226,14 @@ considered trapped and
 ``True`` (R5.3).
 """
 
+# -- Run defaults ----------------------------------------------------------
+
+DEFAULT_AGENT_COUNT: int = 3
+"""Agents spawned when ``--agents`` is not given (bare ``python -m crowd_evac``)."""
+
+DEFAULT_SPAWN_SEED: int = 42
+"""Spawn RNG seed used when ``--seed`` is not given."""
+
 # -- Rendering and visualization (FR-7) ------------------------------------
 
 PIXELS_PER_METER: float = 40.0

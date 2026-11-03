@@ -29,7 +29,7 @@ import time
 from collections.abc import Sequence
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeAlias
 
 import numpy as np
 
@@ -37,16 +37,15 @@ from crowd_evac.adapters.io.scenario_loader import (
     load_bundled_scenario,
     load_scenario_file,
 )
-from crowd_evac.application.injection import add_panic_source
+from crowd_evac.application.injection import (
+    apply_due_events,
+    apply_event,
+    events_by_tick,
+)
 from crowd_evac.application.rng import SeededRNG
 from crowd_evac.application.simulation import Simulation
 from crowd_evac.domain.agent_state import spawn
 from crowd_evac.domain.collision import CollisionMap
-from crowd_evac.domain.constants import (
-    HAZARD_BLOCK_RADIUS,
-    PANIC_DECAY_RATE,
-    PANIC_RANGE,
-)
 from crowd_evac.domain.exit_model import ExitModel
 from crowd_evac.domain.panic_field import PanicField
 from crowd_evac.domain.params import ForceParams
@@ -74,6 +73,12 @@ DEFAULT_WALL_CLOCK_CAP_S: float = 120.0
 
 DEFAULT_HISTORY_INTERVAL: int = 10
 """State snapshot collected every this many ticks (tick 0 is always included)."""
+
+_EvalArgs: TypeAlias = tuple[
+    ForceParams, "str | Path", int, int, float, int, int,
+    tuple["EmergencyEventData", ...],
+]
+"""Picklable argument tuple for :func:`_eval_task`."""
 
 
 # ---------------------------------------------------------------------------
@@ -139,6 +144,8 @@ def evaluate(
     *,
     wall_clock_cap_s: float = DEFAULT_WALL_CLOCK_CAP_S,
     history_interval: int = DEFAULT_HISTORY_INTERVAL,
+    agent_count: int,
+    events: Sequence[EmergencyEventData] = (),
 ) -> RunResult:
     """Run one headless simulation and return all evaluation signals.
 
@@ -148,13 +155,13 @@ def evaluate(
     returns a :class:`RunResult` containing the per-tick metric series and a
     compact sampled state history.
 
-    The same (*params*, *scenario*, *seed*) triple always produces a
-    bit-identical :class:`RunResult` — the run is fully deterministic.  Any
-    ``events`` declared in the scenario file (scripted emergencies) are part of
-    that determinism: each is injected via
-    :func:`~crowd_evac.application.injection.add_panic_source` at its scheduled
-    tick, driving panic and (when it blocks navigation) re-routing the crowd —
-    this is how ``hazard_avoidance_cost`` is exercised in headless validation.
+    The same (*params*, *scenario*, *seed*, *agent_count*, *events*) inputs
+    always produce a bit-identical :class:`RunResult` — the run is fully
+    deterministic.  Scripted *events* are part of that determinism: each is
+    injected via :func:`~crowd_evac.application.injection.add_panic_source` at
+    its scheduled tick, driving panic and (when it blocks navigation)
+    re-routing the crowd — this is how ``hazard_avoidance_cost`` is exercised
+    in headless validation.
 
     Args:
         params: Force-weight configuration to evaluate.
@@ -172,17 +179,21 @@ def evaluate(
             process indefinitely.
         history_interval: Capture a state snapshot every this many ticks.
             Tick 0 (initial state) is always captured regardless of this value.
+        agent_count: Number of agents to spawn.  Required keyword; scenario
+            files no longer carry a population.
+        events: Scripted emergency events to inject at their ticks.
 
     Returns:
         A fully-populated :class:`RunResult`.
 
     Raises:
-        TypeError: If *scenario* is neither ``str`` nor :class:`~pathlib.Path`.
+        TypeError: If *scenario* is neither ``str`` nor :class:`~pathlib.Path`,
+            or *agent_count* is omitted.
         MalformedScenarioError: If the scenario file cannot be loaded.
     """
-    floor_plan, scenario_data = _load_scenario(scenario)
-    sim, initial_count = _build_sim(floor_plan, scenario_data, params, seed)
-    events_by_tick = _events_by_tick(scenario_data.get("events", []))
+    floor_plan, _ = _load_scenario(scenario)
+    sim, initial_count = _build_sim(floor_plan, params, seed, agent_count)
+    schedule = events_by_tick(events)
 
     throughput: list[int] = []
     density: list[float] = []
@@ -219,8 +230,8 @@ def evaluate(
         # Fire any scripted emergency events scheduled for the current tick
         # before stepping, so the injected source is active for this step's
         # panic-decay/propagation phase (matching live injection semantics).
-        if events_by_tick:
-            _apply_due_events(sim, events_by_tick)
+        if schedule:
+            apply_due_events(sim, schedule)
 
         sim.step()
         tick_count += 1
@@ -296,6 +307,8 @@ def evaluate_batch(
     wall_clock_cap_s: float = DEFAULT_WALL_CLOCK_CAP_S,
     history_interval: int = DEFAULT_HISTORY_INTERVAL,
     max_workers: int | None = None,
+    agent_count: int,
+    events: Sequence[EmergencyEventData] = (),
 ) -> list[RunResult]:
     """Evaluate a Cartesian (candidates × seeds) batch in parallel.
 
@@ -318,6 +331,8 @@ def evaluate_batch(
             :func:`evaluate`.
         max_workers: Worker process count.  ``None`` uses
             :func:`os.cpu_count` (all logical cores).
+        agent_count: Agents spawned in every run.  Required keyword.
+        events: Scripted events injected in every run.
 
     Returns:
         List of :class:`RunResult`, length ``len(candidates) × len(seeds)``.
@@ -332,8 +347,12 @@ def evaluate_batch(
 
     n_workers = max_workers if max_workers is not None else (os.cpu_count() or 1)
 
-    tasks: list[tuple[ForceParams, str | Path, int, int, float, int]] = [
-        (p, scenario, s, max_ticks, wall_clock_cap_s, history_interval)
+    event_tuple = tuple(events)
+    tasks: list[_EvalArgs] = [
+        (
+            p, scenario, s, max_ticks, wall_clock_cap_s, history_interval,
+            agent_count, event_tuple,
+        )
         for p in candidates
         for s in seeds
     ]
@@ -358,10 +377,13 @@ def rerouted_flow_field(
     scenario: str | Path,
     params: ForceParams,
     seed: int = 0,
+    *,
+    agent_count: int,
+    events: Sequence[EmergencyEventData] = (),
 ) -> FlowField:
-    """Return the flow field after applying every scenario hazard block.
+    """Return the flow field after applying every hazard block.
 
-    Builds the scenario's simulation and applies *all* of its scripted events
+    Builds the scenario's simulation and applies *all* of the given events
     immediately (their navigation blocks and the graded danger cost scaled by
     ``params.hazard_avoidance_cost``), then returns the resulting re-routed
     field.  This is the field agents navigate while the hazard is active, so it
@@ -376,16 +398,19 @@ def rerouted_flow_field(
         scenario: Bundled scenario name or filesystem path (see :func:`evaluate`).
         params: Force-weight configuration (supplies ``hazard_avoidance_cost``).
         seed: Spawn seed; irrelevant to the returned field.
+        agent_count: Agents to spawn; required to build the simulation but
+            irrelevant to the returned field.
+        events: Scripted hazards to apply.
 
     Returns:
         The re-routed :class:`~crowd_evac.pathfinding.flow_field.FlowField`.
-        Equal to the base field when the scenario declares no events (or when a
+        Equal to the base field when no events are given (or when a
         block would disconnect all exits, which the injector declines).
     """
-    floor_plan, scenario_data = _load_scenario(scenario)
-    sim, _ = _build_sim(floor_plan, scenario_data, params, seed)
-    for event in scenario_data.get("events", []):
-        _apply_event(sim, event)
+    floor_plan, _ = _load_scenario(scenario)
+    sim, _ = _build_sim(floor_plan, params, seed, agent_count)
+    for event in events:
+        apply_event(sim, event)
     return sim.flow_field
 
 
@@ -394,9 +419,7 @@ def rerouted_flow_field(
 # ---------------------------------------------------------------------------
 
 
-def _eval_task(
-    args: tuple[ForceParams, str | Path, int, int, float, int],
-) -> RunResult:
+def _eval_task(args: _EvalArgs) -> RunResult:
     """Unpack args and delegate to :func:`evaluate`.
 
     Must be a top-level function so it is picklable under the Windows
@@ -405,12 +428,15 @@ def _eval_task(
 
     Args:
         args: ``(params, scenario, seed, max_ticks, wall_clock_cap_s,
-            history_interval)``.
+            history_interval, agent_count, events)``.
 
     Returns:
         RunResult from the evaluation.
     """
-    params, scenario, seed, max_ticks, wall_clock_cap_s, history_interval = args
+    (
+        params, scenario, seed, max_ticks, wall_clock_cap_s, history_interval,
+        agent_count, events,
+    ) = args
     return evaluate(
         params,
         scenario,
@@ -418,6 +444,8 @@ def _eval_task(
         max_ticks,
         wall_clock_cap_s=wall_clock_cap_s,
         history_interval=history_interval,
+        agent_count=agent_count,
+        events=events,
     )
 
 
@@ -448,85 +476,23 @@ def _load_scenario(scenario: str | Path) -> tuple[FloorPlan, ScenarioData]:
     )
 
 
-def _events_by_tick(
-    events: list[EmergencyEventData],
-) -> dict[int, list[EmergencyEventData]]:
-    """Group scenario events by their firing tick, preserving listed order.
-
-    Args:
-        events: The scenario's validated event list (possibly empty).
-
-    Returns:
-        Mapping of firing tick to the events scheduled at that tick, in the
-        order they appear in the scenario file.  Empty when ``events`` is empty.
-    """
-    by_tick: dict[int, list[EmergencyEventData]] = {}
-    for event in events:
-        by_tick.setdefault(event["tick"], []).append(event)
-    return by_tick
-
-
-def _apply_due_events(
-    sim: Simulation,
-    events_by_tick: dict[int, list[EmergencyEventData]],
-) -> None:
-    """Inject every event scheduled for the simulation's current tick.
-
-    Args:
-        sim: Running simulation; mutated in-place by each injection.
-        events_by_tick: Tick-grouped event schedule from
-            :func:`_events_by_tick`.
-    """
-    for event in events_by_tick.get(sim.tick, ()):
-        _apply_event(sim, event)
-
-
-def _apply_event(sim: Simulation, event: EmergencyEventData) -> None:
-    """Translate one scenario event into a panic-source injection.
-
-    Optional event fields fall back to the same domain-constant defaults used
-    by :func:`~crowd_evac.application.injection.add_panic_source`, so an event
-    that specifies only ``tick``/``type``/``pos`` reproduces a default-strength
-    hazard.
-
-    Args:
-        sim: Running simulation to inject into.
-        event: A single validated emergency event.
-    """
-    pos = (event["pos"][0], event["pos"][1])
-    add_panic_source(
-        sim,
-        event.get("source_type", "fire"),
-        pos,
-        intensity=event.get("intensity", 1.0),
-        radius=event.get("radius", PANIC_RANGE),
-        block_radius=event.get("block_radius", HAZARD_BLOCK_RADIUS),
-        decay_rate=event.get("decay_rate", PANIC_DECAY_RATE),
-        block_cells=event.get("blocks_navigation", True),
-    )
-
-
 def _build_sim(
     floor_plan: FloorPlan,
-    scenario_data: ScenarioData,
     params: ForceParams,
     seed: int,
+    count: int,
 ) -> tuple[Simulation, int]:
-    """Construct a fully-wired Simulation from loaded scenario data.
-
-    The scenario's own ``spawn_seed`` is ignored; *seed* is used instead so
-    the harness controls reproducibility independently of the scenario file.
+    """Construct a fully-wired Simulation from a loaded floor plan.
 
     Args:
         floor_plan: Domain floor plan from the scenario loader.
-        scenario_data: Raw scenario dict; provides agent count.
         params: Force-weight configuration for this evaluation.
         seed: RNG seed for agent spawning.
+        count: Number of agents to spawn.
 
     Returns:
         ``(Simulation, initial_agent_count)``.
     """
-    count: int = scenario_data["agents"]["count"]
     rng = SeededRNG(seed)
     state = spawn(floor_plan, count, rng.generator)
     flow_field = FlowField.build(floor_plan)
