@@ -87,6 +87,12 @@ pytest tests/ -v      # Run all tests (excludes perf, e2e, render)
 pytest tests/ --cov=src --cov-branch --cov-report=term-missing  # Coverage report
 ```
 
+### Running all tests except performance, render, e2e
+
+```powershell
+flake8 src/; mypy src/ --strict --no-error-summary; pytest tests/ -qq --no-header -m "not perf and not render and not e2e"
+```
+
 ### Running Tests by Category
 
 Tests are organized by marker. Default runs exclude performance, end-to-end, and render tests for speed:

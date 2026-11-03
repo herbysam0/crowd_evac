@@ -2,8 +2,10 @@
 
 Usage::
 
-    python -m crowd_evac       # launches the Lecture Hall default scenario
-    crowd-evac                 # pip-installed console script (same entry point)
+    python -m crowd_evac                        # Lecture Hall default scenario
+    python -m crowd_evac --scenario NAME        # pick a bundled scenario
+    python -m crowd_evac --list                 # show bundled scenario names
+    crowd-evac                                  # pip-installed console script
 
 :func:`build_simulation_from_scenario` performs all domain + application
 wiring without touching arcade or opening a window, so the full stack is
@@ -12,11 +14,14 @@ testable headless.  :func:`main` takes that result, opens an
 """
 from __future__ import annotations
 
+import argparse
 import enum
 import logging
+from collections.abc import Sequence
 
 import arcade
 
+from crowd_evac.adapters.io.scenario_catalog import list_bundled_scenarios
 from crowd_evac.adapters.io.scenario_loader import load_bundled_scenario
 from crowd_evac.adapters.render.arcade_input import ArcadeInputSource
 from crowd_evac.adapters.render.arcade_renderer import ArcadeRenderer
@@ -398,21 +403,66 @@ class EvacWindow(arcade.Window):
             )
 
 
-def main() -> None:
-    """Launch the Lecture Hall default scenario and enter the event loop.
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    """Parse command-line arguments.
 
-    Loads the bundled Lecture Hall, wires the simulation, opens
-    :class:`EvacWindow`, and calls ``arcade.run()``.  Returns when the
-    player closes the window.
+    Args:
+        argv: Argument list excluding the program name; ``None`` reads
+            ``sys.argv``.
+
+    Returns:
+        Namespace with ``scenario`` (validated bundled name) and ``list``
+        (bool, True when ``--list`` was given).  Exits with status 2 via
+        argparse if ``--scenario`` is not a bundled scenario.
+    """
+    available = list_bundled_scenarios()
+    parser = argparse.ArgumentParser(
+        prog="crowd-evac",
+        description="Run a crowd evacuation simulation.",
+    )
+    parser.add_argument(
+        "-s",
+        "--scenario",
+        default=DEFAULT_SCENARIO,
+        choices=available,
+        metavar="NAME",
+        help=f"bundled scenario to run (default: {DEFAULT_SCENARIO}); "
+        f"one of: {', '.join(available)}",
+    )
+    parser.add_argument(
+        "-l",
+        "--list",
+        action="store_true",
+        help="print bundled scenario names and exit",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: Sequence[str] | None = None) -> None:
+    """Launch the selected scenario and enter the event loop.
+
+    Loads the bundled scenario chosen via ``--scenario`` (default Lecture
+    Hall), wires the simulation, opens :class:`EvacWindow`, and calls
+    ``arcade.run()``.  With ``--list``, prints scenario names and returns
+    without opening a window.  Returns when the player closes the window.
+
+    Args:
+        argv: Argument list excluding the program name; ``None`` reads
+            ``sys.argv``.
 
     Raises:
-        MalformedScenarioError: If the bundled Lecture Hall file is missing.
+        MalformedScenarioError: If the bundled scenario file is malformed.
         PathfindingError: If the floor plan has no walkable exit.
     """
+    args = parse_args(argv)
+    if args.list:
+        # CLI output is user-facing, not diagnostic logging.
+        print("\n".join(list_bundled_scenarios()))
+        return
     logging.basicConfig(
         level=logging.WARNING,
         format="%(levelname)s %(name)s: %(message)s",
     )
-    sim, floor_plan = build_simulation_from_scenario(DEFAULT_SCENARIO)
-    EvacWindow(sim, floor_plan, DEFAULT_SCENARIO)
+    sim, floor_plan = build_simulation_from_scenario(args.scenario)
+    EvacWindow(sim, floor_plan, args.scenario)
     arcade.run()

@@ -2,7 +2,7 @@
 
 Two entry points:
 - :func:`load_scenario_file` — load from an explicit filesystem path.
-- :func:`load_bundled_scenario` — load by name from package assets,
+- :func:`load_bundled_scenario` — load by name from repo ``assets/scenarios``,
   independent of the current working directory (R0.4, R3.3).
 
 Both return ``(FloorPlan, ScenarioData)``; the FloorPlan is the
@@ -12,10 +12,10 @@ and simulation config for later steps.
 from __future__ import annotations
 
 import json
-from importlib.resources import files
 from pathlib import Path
 from typing import Any, cast
 
+from crowd_evac.adapters.io.scenario_catalog import SCENARIOS_DIR
 from crowd_evac.domain.errors import MalformedScenarioError
 from crowd_evac.domain.floor_plan import (
     Exit,
@@ -69,9 +69,9 @@ def load_scenario_file(path: Path) -> tuple[FloorPlan, ScenarioData]:
 def load_bundled_scenario(name: str) -> tuple[FloorPlan, ScenarioData]:
     """Load a bundled scenario by name using importlib.resources.
 
-    Bundled scenarios are JSON files shipped with the crowd_evac package
-    under ``crowd_evac/assets/scenarios/<name>.json``. Resolution uses
-    ``importlib.resources`` so the result is independent of the current
+    Bundled scenarios are JSON files in the repo-root
+    ``assets/scenarios/<name>.json``. Resolution is anchored to this
+    module's location, so the result is independent of the current
     working directory.
 
     Args:
@@ -86,10 +86,10 @@ def load_bundled_scenario(name: str) -> tuple[FloorPlan, ScenarioData]:
             malformed.
         ScenarioValidationError: If the data fails semantic validation.
     """
-    resource = files("crowd_evac.assets") / "scenarios" / f"{name}.json"
+    resource = SCENARIOS_DIR / f"{name}.json"
     try:
         text = resource.read_text(encoding="utf-8")
-    except (FileNotFoundError, TypeError) as exc:
+    except FileNotFoundError as exc:
         raise MalformedScenarioError(
             f"Bundled scenario not found: {name!r}"
         ) from exc

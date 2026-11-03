@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "crowd-evac"
-version = "0.1.0"
+version = "0.1.1"
 description = "Real-time 2D crowd-evacuation game with NumPy simulation core"
 readme = "README.md"
 license = "MIT"
@@ -46,7 +46,7 @@ package-dir = {"" = "src"}
 find = {include = ["crowd_evac*"]}
 
 [tool.setuptools.package-data]
-crowd_evac = ["py.typed", "assets/scenarios/*.json"]
+crowd_evac = ["py.typed"]
 
 [tool.mypy]
 strict = true
