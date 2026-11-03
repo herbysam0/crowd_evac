@@ -411,9 +411,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             ``sys.argv``.
 
     Returns:
-        Namespace with ``scenario`` (validated bundled name) and ``list``
-        (bool, True when ``--list`` was given).  Exits with status 2 via
-        argparse if ``--scenario`` is not a bundled scenario.
+        Namespace with ``scenario`` (validated bundled name), ``list``
+        (bool, True when ``--list`` was given) and ``design`` (bool, True
+        when ``--design`` was given).  Exits with status 2 via argparse if
+        ``--scenario`` is not a bundled scenario, or if ``--design`` is
+        combined with ``--list`` or a non-default ``--scenario``.
     """
     available = list_bundled_scenarios()
     parser = argparse.ArgumentParser(
@@ -435,7 +437,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="print bundled scenario names and exit",
     )
-    return parser.parse_args(argv)
+    parser.add_argument(
+        "-d",
+        "--design",
+        action="store_true",
+        help="open the room designer instead of running a scenario",
+    )
+    args = parser.parse_args(argv)
+    if args.design and (args.list or args.scenario != DEFAULT_SCENARIO):
+        parser.error("--design cannot be combined with --list or --scenario")
+    return args
 
 
 def main(argv: Sequence[str] | None = None) -> None:
@@ -444,7 +455,9 @@ def main(argv: Sequence[str] | None = None) -> None:
     Loads the bundled scenario chosen via ``--scenario`` (default Lecture
     Hall), wires the simulation, opens :class:`EvacWindow`, and calls
     ``arcade.run()``.  With ``--list``, prints scenario names and returns
-    without opening a window.  Returns when the player closes the window.
+    without opening a window.  With ``--design``, opens the room designer
+    (imported lazily so normal runs never load it) and returns when it is
+    closed.  Returns when the player closes the window.
 
     Args:
         argv: Argument list excluding the program name; ``None`` reads
@@ -455,6 +468,13 @@ def main(argv: Sequence[str] | None = None) -> None:
         PathfindingError: If the floor plan has no walkable exit.
     """
     args = parse_args(argv)
+    if args.design:
+        # Lazy import: the designer is a separate tool and must not slow or
+        # break normal scenario runs.
+        from crowd_evac.adapters.render.designer_window import run_designer
+
+        run_designer()
+        return
     if args.list:
         # CLI output is user-facing, not diagnostic logging.
         print("\n".join(list_bundled_scenarios()))

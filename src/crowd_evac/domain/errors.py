@@ -32,6 +32,16 @@ class ScenarioValidationError(ScenarioError):
     pass
 
 
+class DesignValidationError(ScenarioError):
+    """Raised when a room-designer edit would produce an invalid layout.
+
+    The design model rejects the change and leaves its state untouched.
+    Examples: wall outside the room, obstacle overlapping a wall.
+    """
+
+    pass
+
+
 class PathfindingError(CrowdEvacError):
     """Raised when a navigation field cannot be constructed.
 
