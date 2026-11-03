@@ -19,12 +19,14 @@ Functions defined here:
 - :func:`compose` (step 1.11): Combine all enabled force terms into a single
   acceleration array ready for the integrator (FR-14 R14.1).
 
-The crowd terms find neighbours through
-:class:`~crowd_evac.domain.spatial_hash.SpatialHash`; a caller may pass a
-pre-built hash (so the terms share one build per tick) or let each term build
-its own at the appropriate radius.  :func:`compose` builds one shared hash at
-the largest radius required by the enabled crowd terms so only one index is
-constructed per tick.
+The short-range pair terms (:func:`f_crowd`, :func:`f_density`) find
+neighbours through :class:`~crowd_evac.domain.spatial_hash.SpatialHash`; a
+caller may pass a pre-built hash (so the terms share one build per tick) or let
+each term build its own at the appropriate radius.  :func:`compose` builds one
+shared hash at the larger of those two radii so only one index is constructed
+per tick.  :func:`f_herd` does *not* enumerate pairs: its perception radius is
+comparable to the floor span, so it aggregates velocity per coarse grid cell in
+``O(N)`` rather than degenerating to an all-pairs query.
 """
 from __future__ import annotations
 
@@ -33,7 +35,7 @@ import math
 import numpy as np
 import numpy.typing as npt
 
-from crowd_evac.domain.agent_state import AgentState, Vec2Array
+from crowd_evac.domain.agent_state import AgentState, Int1D, Vec2Array
 from crowd_evac.domain.constants import (
     DENSITY_PRESSURE_STRENGTH,
     DENSITY_SENSING_RADIUS,
@@ -194,24 +196,29 @@ def f_crowd(
 
     out: Vec2Array = np.zeros((state.count, 2), dtype=np.float64)
     sh = _resolve_hash(state, spatial_hash, radius)
-    gi, gj = sh.query_pairs()
+    gi, _ = sh.query_pairs()
     if gi.size == 0:
         return out
 
-    delta: Vec2Array = state.pos[gi] - state.pos[gj]  # points j -> i
-    dist: npt.NDArray[np.float64] = np.linalg.norm(delta, axis=1)
-    close = (dist < radius) & (dist > 0.0)
+    delta, dist_sq = sh.pair_offsets(state)  # delta points j -> i
+    # Mask on squared distance; the costly square root is taken only for the
+    # in-range subset below.
+    close = (dist_sq < radius * radius) & (dist_sq > 0.0)
     if not np.any(close):
         return out
 
     gi_c = gi[close]
     delta_c = delta[close]
-    dist_c = dist[close]
+    dist_c = np.sqrt(dist_sq[close])
     d_clamped = np.maximum(dist_c, min_distance)
     magnitude = strength * (radius - dist_c) / d_clamped  # (P,)
-    direction = delta_c / dist_c[:, np.newaxis]           # unit j -> i
-    contrib: Vec2Array = direction * magnitude[:, np.newaxis]
-    np.add.at(out, gi_c, contrib)
+    # contrib = (delta_c / dist_c) * magnitude; fold the two scalar divides
+    # into one per-pair factor to halve the elementwise work.
+    factor: npt.NDArray[np.float64] = magnitude / dist_c  # (P,)
+    n = state.count
+    # bincount is far faster than the unbuffered np.add.at scatter.
+    out[:, 0] = np.bincount(gi_c, weights=delta_c[:, 0] * factor, minlength=n)
+    out[:, 1] = np.bincount(gi_c, weights=delta_c[:, 1] * factor, minlength=n)
     return out
 
 
@@ -275,17 +282,35 @@ def f_density(
     return out
 
 
+def _box_sum_3x3(grid: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+    """Return the 3x3 neighbourhood sum of a once-zero-padded 2D grid.
+
+    Args:
+        grid: Array of shape ``(gx, gy)`` carrying exactly one cell of zero
+            padding on every side.
+
+    Returns:
+        Array of shape ``(gx - 2, gy - 2)`` where entry ``(i, j)`` is the sum
+        of ``grid[i:i+3, j:j+3]`` — i.e. the total over the 3x3 block of
+        *unpadded* cells centred on cell ``(i, j)``.
+    """
+    return (
+        grid[0:-2, 0:-2] + grid[0:-2, 1:-1] + grid[0:-2, 2:]
+        + grid[1:-1, 0:-2] + grid[1:-1, 1:-1] + grid[1:-1, 2:]
+        + grid[2:, 0:-2] + grid[2:, 1:-1] + grid[2:, 2:]
+    )
+
+
 def f_herd(
     state: AgentState,
-    spatial_hash: SpatialHash | None = None,
     *,
     radius: float = HERD_PERCEPTION_RADIUS,
     strength: float = HERD_ATTRACTION_STRENGTH,
 ) -> Vec2Array:
     """Compute panic-scaled herd alignment toward local mean velocity (R2.5).
 
-    Each agent is drawn toward the mean velocity of all live agents within
-    ``radius``, scaled by its own panic level::
+    Each agent is drawn toward the mean velocity of the live agents in its
+    neighbourhood, scaled by its own panic level::
 
         a_i = strength * panic_i * (mean_velocity_i - v_i)
 
@@ -293,12 +318,21 @@ def f_herd(
     follows the surrounding crowd flow. Agents with no neighbours, and dead
     agents, receive a zero row.
 
+    **Approximation (accuracy traded for speed).** The neighbourhood is the
+    agent's own cell plus the eight adjacent cells of a uniform grid whose side
+    equals ``radius`` — a 3x3 box covering ``[radius, 2*radius)`` in each
+    direction rather than the exact disc of radius ``radius``. Velocity sums
+    and counts are aggregated *per cell* and read back per agent, making the
+    term ``O(N)`` instead of the ``O(N^2)`` pair enumeration an exact disc
+    requires. This matters because the tuned ``radius`` (~15 m) is comparable
+    to the floor span, so an exact query degenerates to all-pairs. Herd
+    alignment is a diffuse, large-radius drift, so the square-neighbourhood
+    approximation has negligible behavioural effect while removing the dominant
+    per-tick cost. The result is fully deterministic (R6.2).
+
     Args:
-        state: Current agent state (velocities, panic, liveness).
-        spatial_hash: Optional pre-built neighbour index. If ``None``, one is
-            built at ``radius``. If supplied, its cell size must be
-            ``>= radius``.
-        radius: Herd-perception radius in metres. Must be positive.
+        state: Current agent state (positions, velocities, panic, liveness).
+        radius: Herd-perception grid cell side in metres. Must be positive.
         strength: Alignment scale. Must be non-negative.
 
     Returns:
@@ -306,8 +340,7 @@ def f_herd(
         Dead and isolated agents have zero rows.
 
     Raises:
-        ValueError: If ``radius`` is not positive, ``strength`` is negative,
-            or a supplied hash is too coarse.
+        ValueError: If ``radius`` is not positive or ``strength`` is negative.
     """
     if radius <= 0.0:
         raise ValueError(f"radius must be positive, got {radius!r}")
@@ -315,33 +348,52 @@ def f_herd(
         raise ValueError(f"strength must be non-negative, got {strength!r}")
 
     out: Vec2Array = np.zeros((state.count, 2), dtype=np.float64)
-    sh = _resolve_hash(state, spatial_hash, radius)
-    gi, gj = sh.query_pairs()
-    if gi.size == 0:
+    active = state.active_indices
+    if active.size < 2:
+        # Fewer than two live agents: no neighbour can exist.
         return out
 
-    dist: npt.NDArray[np.float64] = np.linalg.norm(
-        state.pos[gi] - state.pos[gj], axis=1
-    )
-    within = dist < radius
-    if not np.any(within):
+    pos: Vec2Array = state.pos[active]
+    vel: Vec2Array = state.vel[active]
+    panic: npt.NDArray[np.float64] = state.panic[active]
+
+    # Bin active agents into a uniform grid of cell side ``radius`` and shift so
+    # the minimum cell index is 0; an agent's 3x3 cell block is then its
+    # herd neighbourhood.
+    inv_cell = 1.0 / radius
+    cx: npt.NDArray[np.intp] = np.floor(pos[:, 0] * inv_cell).astype(np.intp)
+    cy: npt.NDArray[np.intp] = np.floor(pos[:, 1] * inv_cell).astype(np.intp)
+    cx -= cx.min()
+    cy -= cy.min()
+    n_cx = int(cx.max()) + 1
+    n_cy = int(cy.max()) + 1
+
+    # Accumulate per-cell velocity sums and counts, padding by one cell on every
+    # side so the 3x3 box sum needs no bounds handling. Padded index = cell + 1.
+    sum_vx = np.zeros((n_cx + 2, n_cy + 2), dtype=np.float64)
+    sum_vy = np.zeros((n_cx + 2, n_cy + 2), dtype=np.float64)
+    counts = np.zeros((n_cx + 2, n_cy + 2), dtype=np.float64)
+    np.add.at(sum_vx, (cx + 1, cy + 1), vel[:, 0])
+    np.add.at(sum_vy, (cx + 1, cy + 1), vel[:, 1])
+    np.add.at(counts, (cx + 1, cy + 1), 1.0)
+
+    box_vx = _box_sum_3x3(sum_vx)  # (n_cx, n_cy), indexed by (cx, cy)
+    box_vy = _box_sum_3x3(sum_vy)
+    box_cnt = _box_sum_3x3(counts)
+
+    # Per-agent neighbourhood totals exclude the agent itself.
+    neigh_cnt = box_cnt[cx, cy] - 1.0
+    has = neigh_cnt > 0.0
+    if not np.any(has):
         return out
 
-    gi_w = gi[within]
-    gj_w = gj[within]
-    vel_sum: Vec2Array = np.zeros((state.count, 2), dtype=np.float64)
-    np.add.at(vel_sum, gi_w, state.vel[gj_w])
-    counts: npt.NDArray[np.intp] = np.zeros(state.count, dtype=np.intp)
-    np.add.at(counts, gi_w, 1)
-
-    has_neighbours = counts > 0
-    mean_vel: Vec2Array = (
-        vel_sum[has_neighbours] / counts[has_neighbours][:, np.newaxis]
-    )
-    panic_h = state.panic[has_neighbours][:, np.newaxis]
-    out[has_neighbours] = (
-        strength * panic_h * (mean_vel - state.vel[has_neighbours])
-    )
+    inv = 1.0 / neigh_cnt[has]
+    mean0 = (box_vx[cx, cy][has] - vel[has, 0]) * inv
+    mean1 = (box_vy[cx, cy][has] - vel[has, 1]) * inv
+    scale = strength * panic[has]
+    rows: Int1D = active[has]
+    out[rows, 0] = scale * (mean0 - vel[has, 0])
+    out[rows, 1] = scale * (mean1 - vel[has, 1])
     return out
 
 
@@ -464,8 +516,11 @@ def compose(
             panic_speed_multiplier=_p.panic_speed_multiplier,
         )
 
-    # Build one shared spatial hash for all crowd terms that need it,
-    # using the radii from params so the hash covers all required distances.
+    # Build one shared spatial hash for the pair-enumerating crowd terms
+    # (repulsion, density) at the larger of their two radii.  Herd alignment
+    # no longer enumerates pairs — it aggregates per grid cell internally — so
+    # its large perception radius is deliberately excluded here: including it
+    # would inflate the cell size and force a near-all-pairs candidate set.
     sh: SpatialHash | None = spatial_hash
     if sh is None:
         _needed: list[float] = []
@@ -473,8 +528,6 @@ def compose(
             _needed.append(_p.repulsion_radius)
         if enable_density:
             _needed.append(_p.density_sensing_radius)
-        if enable_herd:
-            _needed.append(_p.herd_perception_radius)
         if _needed:
             sh = SpatialHash.build(state, max(_needed))
 
@@ -493,7 +546,7 @@ def compose(
         )
     if enable_herd:
         out = out + f_herd(
-            state, sh,
+            state,
             radius=_p.herd_perception_radius,
             strength=_p.herd_attraction_strength,
         )
