@@ -158,8 +158,8 @@ One commit per step (user runs commits). Status as built:
 5. [x] Window + panel: arcade canvas and `arcade.gui` widgets, delegating to the controller.
 6. [x] CLI: `--design` / `-d` flag in `parse_args`, lazy import and dispatch in `main`.
 7. [x] Docs: README usage. Version `0.1.1` -> `0.2.0` in `pyproject.toml` and `__version__`.
-8. [ ] Commit, then PR from `issue-2-add-room-designer-feature` with `Closes #2` (user).
-9. [ ] Close the issue (prompt below) (user).
+8. [x] Commit, then PR from `issue-2-add-room-designer-feature` with `Closes #2` (user).
+9. [x] Close the issue (prompt below) (user).
 
 Added during review (not in the original plan): per-wall thickness, move, X/Y fields,
 loading existing scenarios (`importer.py`, `designer_io.py`), loud banners, display-fitted
