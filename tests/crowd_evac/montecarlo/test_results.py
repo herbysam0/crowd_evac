@@ -149,3 +149,44 @@ class TestCurves:
         assert curves.per_run.shape == (0, 1)
         assert curves.times_s.tolist() == [0.0]
         assert curves.mean.tolist() == [0.0]
+
+
+class TestSpeedStats:
+    """Speed mean / std dev cover every run with a value."""
+
+    def test_outcome_carries_speed(self) -> None:
+        """Verify make_outcome stores the run's moving speed."""
+        outcome = make_outcome(0, 1, (), 1, (0, 1), 1.25)
+        assert outcome.moving_speed_mps == pytest.approx(1.25)
+        assert _outcome(0, (1, 1)).moving_speed_mps is None
+
+    def test_mean_and_std(self) -> None:
+        """Verify mean and ddof=1 std dev over runs."""
+        runs = [
+            make_outcome(i, i, (), 1, (0, 1), v)
+            for i, v in enumerate((1.0, 2.0, 3.0))
+        ]
+        summary = summarize(runs)
+        assert summary.speed_mean_mps == pytest.approx(2.0)
+        assert summary.speed_std_mps == pytest.approx(1.0)
+
+    def test_one_run_has_no_std(self) -> None:
+        """Verify a single value gives a mean and no std dev."""
+        summary = summarize([make_outcome(0, 1, (), 1, (1,), 1.1)])
+        assert summary.speed_mean_mps == pytest.approx(1.1)
+        assert summary.speed_std_mps is None
+
+    def test_incomplete_runs_included(self) -> None:
+        """Verify a trapped-agent run still contributes its speed."""
+        runs = [
+            make_outcome(0, 1, (), 2, (0, 0), 0.5),
+            make_outcome(1, 2, (), 1, (0, 1), 1.5),
+        ]
+        summary = summarize(runs)
+        assert summary.complete == 1
+        assert summary.speed_mean_mps == pytest.approx(1.0)
+
+    def test_no_values_gives_none(self) -> None:
+        """Verify no measured speed gives None, with or without a time."""
+        assert summarize([_outcome(0, (1, 1))]).speed_mean_mps is None
+        assert summarize([]).speed_mean_mps is None

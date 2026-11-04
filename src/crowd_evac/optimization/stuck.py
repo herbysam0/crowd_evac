@@ -64,7 +64,7 @@ STUCK_SPEED_EPS_MPS: float = 0.05
 """Speed (m/s) at or below which an agent is treated as stalled.
 
 Matches the moving-speed floor used by the realism extractors
-(:data:`~crowd_evac.optimization.realism.MOVING_SPEED_EPS_MPS`): below this an
+(:data:`~crowd_evac.domain.constants.MOVING_SPEED_EPS_MPS`): below this an
 agent is, for evacuation purposes, not making progress.
 """
 

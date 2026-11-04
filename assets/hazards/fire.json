@@ -1,0 +1,10 @@
+{
+  "label": "Fire",
+  "symbol": "🔥",
+  "symbol_size_m": 3.0,
+  "intensity": 1.0,
+  "radius": 10.0,
+  "decay_rate": 0.02,
+  "block_radius": 1.5,
+  "blocks_navigation": true
+}

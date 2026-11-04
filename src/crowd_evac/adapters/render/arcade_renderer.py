@@ -37,17 +37,18 @@ as read-only by convention regardless.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import arcade
 from arcade.types import RGBA255
 
-from crowd_evac.domain.constants import (
-    AGENT_RADIUS,
-    FIRE_SYMBOL_SIZE_M,
-    PIXELS_PER_METER,
+from crowd_evac.adapters.io.hazard_catalog import (
+    HazardType,
+    load_hazard_types,
 )
+from crowd_evac.domain.constants import AGENT_RADIUS, PIXELS_PER_METER
 from crowd_evac.domain.floor_plan import ExitSide, FloorPlan
 from crowd_evac.domain.panic_source import PanicSource
 
@@ -98,24 +99,9 @@ MIN_SYMBOL_FONT_PX: int = 1
 # Emergency symbol configuration
 # ---------------------------------------------------------------------------
 
-_SYMBOL_CHAR: dict[str, str] = {
-    "fire": "\U0001f525",  # U+1F525 FIRE — rendered by Segoe UI Emoji on Windows 11
-}
-"""Maps source_type → Unicode character drawn at the hazard position.
-
-Each entry is rendered by :meth:`ArcadeRenderer._draw_panic_sources` using the
-OS emoji font.  Add entries here to support additional hazard types.
-"""
-
-_SYMBOL_SIZE_M: dict[str, float] = {
-    "fire": FIRE_SYMBOL_SIZE_M,
-}
-"""Maps source_type → symbol world-space diameter in metres.
-
-The rendered symbol is scaled to ``size_m × pixels_per_meter`` pixels on each
-call so it stays fixed in world space regardless of the rendering scale.
-Add or override entries to configure the visual size per hazard type.
-"""
+# Symbols and their world-space sizes come from ``assets/hazards/*.json`` via
+# the hazard catalog.  The symbol is scaled to ``size_m * pixels_per_meter``
+# pixels on each draw so it stays fixed in world space.
 
 _SYMBOL_FONTS: tuple[str, ...] = (
     "Segoe UI Emoji",    # Windows 11
@@ -312,6 +298,7 @@ class ArcadeRenderer:
         headless: bool = False,
         y_offset_px: float = 0.0,
         x_offset_px: float = 0.0,
+        hazard_types: Mapping[str, HazardType] | None = None,
     ) -> None:
         if pixels_per_meter <= 0.0:
             raise ValueError("pixels_per_meter must be positive")
@@ -323,6 +310,10 @@ class ArcadeRenderer:
         self._headless = headless
         self._y_offset_px = y_offset_px
         self._x_offset_px = x_offset_px
+        # Loaded once: reading the files every frame would be wasteful.
+        self._hazard_types: Mapping[str, HazardType] = (
+            load_hazard_types() if hazard_types is None else hazard_types
+        )
         # ppm at which the background image was loaded (its native scale).
         self._bg_base_ppm = pixels_per_meter
 
@@ -526,9 +517,9 @@ class ArcadeRenderer:
            decays.  Alpha is also scaled by intensity so expired sources fade
            before disappearing.
         2. A hazard-type symbol (e.g. 🔥 for ``source_type="fire"``) drawn
-           centred at the source position using the OS emoji font.  Symbol size
-           is looked up from :data:`_SYMBOL_SIZE_M` (world-space metres),
-           defaulting to 1 m when the type is not registered.
+           centred at the source position using the OS emoji font.  Symbol and
+           size (world-space metres) come from the hazard type catalog; a
+           type with no file or no symbol gets only the circle.
 
         Args:
             sources: Panic sources from the current snapshot (read-only).
@@ -551,12 +542,13 @@ class ArcadeRenderer:
                 src.radius * intensity * ppm,
                 color,
             )
-            symbol = _SYMBOL_CHAR.get(src.source_type)
-            if symbol is not None:
-                size_m = _SYMBOL_SIZE_M.get(src.source_type, 1.0)
-                font_size_px = max(MIN_SYMBOL_FONT_PX, int(size_m * ppm))
+            hazard_type = self._hazard_types.get(src.source_type)
+            if hazard_type is not None and hazard_type.symbol is not None:
+                font_size_px = max(
+                    MIN_SYMBOL_FONT_PX, int(hazard_type.symbol_size_m * ppm)
+                )
                 arcade.draw_text(
-                    symbol,
+                    hazard_type.symbol,
                     cx_px,
                     cy_px,
                     arcade.color.WHITE,

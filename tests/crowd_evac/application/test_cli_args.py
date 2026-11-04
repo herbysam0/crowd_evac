@@ -16,10 +16,42 @@ class TestParseArgs:
     """Suite for parse_args."""
 
     def test_no_args_selects_default(self) -> None:
-        """Verify omitted flag keeps the Lecture Hall default."""
+        """Verify omitted flag resolves to the Lecture Hall default."""
         args = parse_args([])
         assert args.scenario == DEFAULT_SCENARIO
         assert args.list is False
+
+    def test_no_flags_opens_dashboard(self) -> None:
+        """Verify no flags at all selects the dashboard."""
+        assert parse_args([]).dashboard is True
+
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            ["-s", "lecture_hall"],
+            ["--scenario", "lecture_hall_no_aisle"],
+            ["--agents", "5"],
+            ["--seed", "3"],
+            ["--hazard", "x=1,y=1"],
+            ["--list"],
+            ["--design"],
+        ],
+        ids=["s-default", "scenario", "agents", "seed", "hazard", "list",
+             "design"],
+    )
+    def test_any_flag_skips_dashboard(self, argv: list[str]) -> None:
+        """Verify each run flag, --list and --design keep the old paths."""
+        assert parse_args(argv).dashboard is False
+
+    def test_explicit_default_scenario_still_resolves(self) -> None:
+        """Verify -s lecture_hall gives the game that room."""
+        assert parse_args(["-s", "lecture_hall"]).scenario == "lecture_hall"
+
+    def test_design_with_explicit_scenario_rejected(self) -> None:
+        """Verify --design -s x exits with status 2."""
+        with pytest.raises(SystemExit) as exc:
+            parse_args(["--design", "-s", "lecture_hall"])
+        assert exc.value.code == 2
 
     @pytest.mark.parametrize("flag", ["--scenario", "-s"])
     def test_scenario_flag_selects_bundled(self, flag: str) -> None:
@@ -118,7 +150,7 @@ class TestMainDesign:
         )
         mocker.patch.object(cli, "EvacWindow")
         mocker.patch.object(cli.arcade, "run")
-        main([])
+        main(["-s", "lecture_hall"])
         run.assert_not_called()
 
     def test_cli_import_does_not_load_designer(self) -> None:
@@ -134,3 +166,57 @@ class TestMainDesign:
             check=True,
         )
         assert result.stdout.strip() == "False"
+
+
+class TestMainDashboard:
+    """Suite for the dashboard dispatch."""
+
+    def test_no_flags_opens_dashboard_only(self, mocker: MockerFixture) -> None:
+        """Verify bare main() runs the dashboard and builds no simulation."""
+        run = mocker.patch(
+            "crowd_evac.adapters.render.dashboard_window.run_dashboard"
+        )
+        build = mocker.patch.object(cli, "build_simulation_from_scenario")
+        window = mocker.patch.object(cli, "EvacWindow")
+        main([])
+        run.assert_called_once_with()
+        build.assert_not_called()
+        window.assert_not_called()
+
+    def test_run_flags_start_the_game(self, mocker: MockerFixture) -> None:
+        """Verify -s starts the game and never opens the dashboard."""
+        run = mocker.patch(
+            "crowd_evac.adapters.render.dashboard_window.run_dashboard"
+        )
+        mocker.patch.object(
+            cli, "build_simulation_from_scenario",
+            return_value=(object(), object()),
+        )
+        mocker.patch.object(cli, "EvacWindow")
+        mocker.patch.object(cli.arcade, "run")
+        main(["-s", "lecture_hall"])
+        run.assert_not_called()
+
+    def test_cli_import_does_not_load_dashboard(self) -> None:
+        """Verify the dashboard is imported lazily, not with the CLI."""
+        code = (
+            "import sys, crowd_evac.application.cli;"
+            "print(any('dashboard' in m for m in sys.modules))"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code], capture_output=True, text=True,
+            check=True,
+        )
+        assert result.stdout.strip() == "False"
+
+    def test_module_main_is_guarded(self) -> None:
+        """Verify importing crowd_evac.__main__ does not run main()."""
+        code = (
+            "import sys; sys.argv = ['x', '--list'];"
+            "import crowd_evac.__main__"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code], capture_output=True, text=True,
+            check=True,
+        )
+        assert result.stdout.strip() == ""

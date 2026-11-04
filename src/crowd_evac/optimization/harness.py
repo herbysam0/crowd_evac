@@ -50,6 +50,7 @@ from crowd_evac.domain.exit_model import ExitModel
 from crowd_evac.domain.panic_field import PanicField
 from crowd_evac.domain.params import ForceParams
 from crowd_evac.metrics.records import make_record
+from crowd_evac.metrics.speed import MovingSpeedTally
 from crowd_evac.pathfinding.flow_field import FlowField
 
 if TYPE_CHECKING:
@@ -115,6 +116,8 @@ class RunResult:
             Shape ``(len(sample_ticks), initial_count)``.
         alive_history: Per-agent liveness flags at each sample tick.
             Shape ``(len(sample_ticks), initial_count)``.
+        moving_speed_mps: Mean speed (m/s) of alive agents above
+            ``MOVING_SPEED_EPS_MPS`` over all ticks; ``None`` if none moved.
     """
 
     evac_time: float
@@ -129,6 +132,7 @@ class RunResult:
     velocities_history: NDArray[np.float64]
     panics_history: NDArray[np.float64]
     alive_history: NDArray[np.bool_]
+    moving_speed_mps: float | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -204,6 +208,7 @@ def evaluate(
     sample_ticks_list: list[int] = []
 
     last_egress_time: float = 0.0
+    speed_tally = MovingSpeedTally()
     is_terminal = False
     wall_start = time.monotonic()
 
@@ -238,6 +243,7 @@ def evaluate(
 
         snap = sim.snapshot()
         rec = make_record(snap, initial_count)
+        speed_tally.add(snap)
 
         throughput.append(rec["egressed_this_tick"])
         density.append(rec["peak_density_m2"])
@@ -295,6 +301,7 @@ def evaluate(
         velocities_history=velocities_history,
         panics_history=panics_history,
         alive_history=alive_history,
+        moving_speed_mps=speed_tally.mean_mps,
     )
 
 

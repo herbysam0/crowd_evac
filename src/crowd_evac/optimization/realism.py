@@ -36,6 +36,7 @@ from dataclasses import dataclass
 import numpy as np
 import numpy.typing as npt
 
+from crowd_evac.domain.constants import MOVING_SPEED_EPS_MPS
 from crowd_evac.optimization.harness import RunResult
 
 # ---------------------------------------------------------------------------
@@ -98,9 +99,6 @@ Congested agents are slow and free walkers are fast, so a high percentile of
 the moving-agent speed distribution isolates the free-walking cohort without
 needing a per-agent local-density estimate.
 """
-
-MOVING_SPEED_EPS_MPS: float = 0.05
-"""Speed floor (m/s) below which an agent is treated as stationary, not walking."""
 
 FD_DENSITY_FLOOR_M2: float = 0.2
 """Density floor (agents/m²) below which a sample is too sparse for the FD term."""

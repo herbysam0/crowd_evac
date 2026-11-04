@@ -135,7 +135,7 @@ def run_one(task: RunTask) -> RunOutcome:
     )
     return make_outcome(
         task.run_index, task.seed, task.events, task.agents,
-        result.throughput_series,
+        result.throughput_series, result.moving_speed_mps,
     )
 
 
@@ -220,6 +220,13 @@ def _execute(
     return _run_pool(tasks, workers, notify, should_cancel)
 
 
+def _spawn_seeds(config: MonteCarloConfig, base_seed: int) -> tuple[int, ...]:
+    """Return the per-run spawn seeds: the base seed itself if direct."""
+    if config.direct_seed:
+        return (base_seed,)
+    return derive_seeds(base_seed, config.runs)
+
+
 def run_monte_carlo(
     config: MonteCarloConfig,
     listener: MonteCarloListener | None = None,
@@ -260,7 +267,7 @@ def run_monte_carlo(
             config.scenario, config.agents, index, seed,
             sample_events(config.hazards, mask, base_seed, index),
         )
-        for index, seed in enumerate(derive_seeds(base_seed, config.runs))
+        for index, seed in enumerate(_spawn_seeds(config, base_seed))
     ]
     outcomes = _execute(
         config, tasks, listener, should_cancel or (lambda: False)

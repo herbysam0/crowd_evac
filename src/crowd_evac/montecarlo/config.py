@@ -93,9 +93,12 @@ class MonteCarloConfig:
         hazards: Hazards applied in every run.
         max_workers: Headless worker processes; ``None`` uses all cores and
             ``1`` runs in-process.  Results never depend on this.
+        direct_seed: Use ``seed`` itself as the spawn seed of the single
+            run, matching the game's ``--seed``, instead of deriving it.
 
     Raises:
-        ValueError: If a count is below its minimum.
+        ValueError: If a count is below its minimum, or ``direct_seed`` is
+            set with more than one run.
     """
 
     scenario: str = DEFAULT_MC_SCENARIO
@@ -105,6 +108,7 @@ class MonteCarloConfig:
     seed: int | None = None
     hazards: tuple[HazardSpec, ...] = ()
     max_workers: int | None = None
+    direct_seed: bool = False
 
     def __post_init__(self) -> None:
         """Validate counts and the seed."""
@@ -114,6 +118,10 @@ class MonteCarloConfig:
             raise ValueError(f"runs must be >= 1, got {self.runs}")
         if self.seed is not None and self.seed < 0:
             raise ValueError(f"seed must be >= 0, got {self.seed}")
+        if self.direct_seed and self.runs != 1:
+            raise ValueError(
+                f"direct_seed needs exactly one run, got {self.runs}"
+            )
         if self.max_workers is not None and self.max_workers < 1:
             raise ValueError(
                 f"max_workers must be >= 1, got {self.max_workers}"

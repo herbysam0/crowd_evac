@@ -28,8 +28,11 @@ pip install -r requirements.txt
 # OR install project in editable mode with dev dependencies
 pip install -e ".[dev]"
 
-# Run the game (Lecture Hall, 3 agents, seed 42)
+# Open the performance dashboard (run one scenario or a Monte Carlo batch)
 python -m crowd_evac
+
+# Run the game (Lecture Hall, 3 agents, seed 42)
+python -m crowd_evac -s lecture_hall
 
 # List the available rooms
 python -m crowd_evac --list
@@ -89,8 +92,70 @@ Commands for each bundled room:
 the same geometry as `lecture_hall`. The old `hazard_lecture_hall` room is the
 fire command above.
 
-An unknown name is rejected with the list of valid choices. Without
-`--scenario`, the default is `lecture_hall`.
+An unknown name is rejected with the list of valid choices. `--scenario`,
+`--agents`, `--seed` or `--hazard` starts the game; with none of them (and no
+`--list` or `--design`) `python -m crowd_evac` opens the dashboard. The game's
+default room is `lecture_hall`, so the old default command is now
+`python -m crowd_evac -s lecture_hall`.
+
+## Performance Dashboard
+
+```powershell
+python -m crowd_evac
+```
+
+The home screen runs one scenario or a Monte Carlo batch and shows the results
+as they arrive. Settings:
+
+| Field | Meaning | Default |
+|---|---|---|
+| Scenario | bundled room (designer rooms appear too) | `lecture_hall` |
+| Persons | persons per run (>= 1) | 1 |
+| Mode | headless, or visual (a separate simulation window) | headless |
+| Seed | blank draws a random seed, shown in the results | blank |
+| Iterations | runs of a Monte Carlo batch (>= 1) | 20 |
+
+**Run single** uses the seed exactly, like the game's `--seed`. **Run Monte
+Carlo** uses it as the base seed, like `scripts/monte_carlo.py`. Each batch runs
+in its own process, so the dashboard stays responsive while a visual batch plays;
+Cancel keeps the runs that already finished. Results are not saved; a new batch
+replaces them.
+
+Hazards are rows of typed fields (up to 6): type, x, y and time (seconds) as
+min and max, plus intensity, radius, decay, block radius and whether the hazard
+blocks the route. A blank max, or one equal to min, means a fixed value; a
+range is sampled once per run. Choosing a type prefills its defaults, and the
+fields are what run.
+
+Results: time to last evacuation (mean, standard deviation, minimum and maximum
+over complete runs for a batch), average velocity, complete and incomplete
+counts, hazards fired, and a graph of persons evacuated against time with one
+thin line per run and a bold average. Average velocity is the mean speed of
+persons who are moving (above 0.05 m/s), so queueing does not lower it.
+
+### Adding a hazard type
+
+A hazard type is a file `assets/hazards/<name>.json`; the file name is the
+`source_type`. It appears in the dashboard the next time it opens, and its icon
+shows in the simulation, with no code change:
+
+```json
+{
+  "label": "Smoke",
+  "symbol": "S",
+  "symbol_size_m": 2.0,
+  "intensity": 1.0,
+  "radius": 8.0,
+  "decay_rate": 0.05,
+  "block_radius": 1.0,
+  "blocks_navigation": false
+}
+```
+
+Every key is optional; without `symbol` only the panic circle is drawn. A type
+only sets defaults: behaviour comes from the numeric values. A file that is not
+valid JSON or has out-of-range values is skipped with a warning in the log.
+`--hazard source_type=smoke` in the game uses the same icon.
 
 ## Monte Carlo Testing
 
@@ -135,9 +200,8 @@ A run ends when everyone has left, when 60 s pass without anyone leaving, or
 after 10,000 ticks. The 60 s limit (`STALL_TICKS`, 1200 ticks) applies to the
 game too: it used to be 10 s, which cut off long single-person walks.
 
-The dashboard will call `crowd_evac.montecarlo.runner.run_monte_carlo`
-directly; its result also carries the data for the evacuated-versus-time
-graph.
+The dashboard calls `crowd_evac.montecarlo.runner.run_monte_carlo` in a child
+process; its result also carries the data for the evacuated-versus-time graph.
 
 ### Migrating schema-1.0 files
 
@@ -175,6 +239,7 @@ src/crowd_evac/
 ├── scenarios/     # Default scenario data and schema
 ├── metrics/       # Per-tick measurement records
 ├── montecarlo/    # Monte Carlo batches (scripts/monte_carlo.py)
+├── dashboard/     # Dashboard logic: form, batch process, chart and results models
 ├── ports/         # Domain-level interfaces
 └── adapters/
     ├── render/    # Arcade rendering backend
@@ -182,12 +247,13 @@ src/crowd_evac/
 
 tests/             # Test suite mirroring src/ structure
 assets/scenarios/  # Bundled scenario data (Lecture Hall)
+assets/hazards/    # Hazard types, one JSON file each (fire.json)
 docs/              # Documentation (PRD, plans)
 ```
 
 ## Gameplay
 
-- **Launch:** `python -m crowd_evac` opens directly into the Lecture Hall scenario (3 agents; use `--agents 150` for the full crowd)
+- **Launch:** `python -m crowd_evac -s lecture_hall` opens directly into the Lecture Hall scenario (3 agents; use `--agents 150` for the full crowd). Without flags, `python -m crowd_evac` opens the dashboard
 - **Controls:**
   - **Click and drag** to place/move a panic source (fire, smoke, etc.)
   - **Spacebar** to start, pause, or reset the simulation

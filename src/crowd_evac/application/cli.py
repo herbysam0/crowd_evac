@@ -497,7 +497,8 @@ def main(argv: Sequence[str] | None = None) -> None:
     spawns ``--agents`` agents from ``--seed``, arms any ``--hazard`` events,
     wires the simulation, opens :class:`EvacWindow`, and calls
     ``arcade.run()``.  With ``--list``, prints scenario names and returns
-    without opening a window.  With ``--design``, opens the room designer
+    without opening a window.  With no flags at all, opens the performance
+    dashboard (imported lazily too).  With ``--design``, opens the room designer
     (imported lazily so normal runs never load it) and returns when it is
     closed.  Returns when the player closes the window.
 
@@ -510,6 +511,12 @@ def main(argv: Sequence[str] | None = None) -> None:
         PathfindingError: If the floor plan has no walkable exit.
     """
     args = parse_args(argv)
+    if args.dashboard:
+        # Lazy import, like the designer: the game must not load it.
+        from crowd_evac.adapters.render.dashboard_window import run_dashboard
+
+        run_dashboard()
+        return
     if args.design:
         # Lazy import: the designer is a separate tool and must not slow or
         # break normal scenario runs.
