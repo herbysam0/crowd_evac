@@ -105,6 +105,49 @@ class TestWindowLogic:
         _drive(window)
         assert [o.run_index for o in window.outcomes] == [0]
 
+    def test_cancel_mid_run_closes_and_drops_unfinished(
+        self, mocker: MockerFixture
+    ) -> None:
+        """Verify cancel is honoured within a run, not only between runs."""
+        _mock_gl(mocker)
+        cancel = {"now": False}
+        window = MonteCarloWindow(
+            _tasks(3), _Collector(), lambda: cancel["now"]
+        )
+        for _ in range(5):
+            window.on_update(_FRAME_S)
+        cancel["now"] = True
+        window.on_update(_FRAME_S)
+        assert window.finished
+        assert window.outcomes == []
+        window.close.assert_called_once()  # type: ignore[attr-defined]
+
+    def test_cancel_after_first_run_keeps_it_and_stops_mid_second(
+        self, mocker: MockerFixture
+    ) -> None:
+        """Verify a finished run is kept when cancel hits the next one."""
+        _mock_gl(mocker)
+        seen = _Collector()
+        cancel = {"now": False}
+        window = MonteCarloWindow(_tasks(3), seen, lambda: cancel["now"])
+        while not seen.outcomes:
+            window.on_update(_FRAME_S)
+        window.on_update(_FRAME_S)  # one tick into run two
+        cancel["now"] = True
+        window.on_update(_FRAME_S)
+        assert window.finished
+        assert [o.run_index for o in window.outcomes] == [0]
+
+    def test_speed_tally_resets_per_run(self, mocker: MockerFixture) -> None:
+        """Verify each run reports its own speed, equal to headless."""
+        _mock_gl(mocker)
+        tasks = _tasks()
+        window = MonteCarloWindow(tasks, _Collector(), lambda: False)
+        _drive(window)
+        for outcome, task in zip(window.outcomes, tasks, strict=True):
+            assert outcome.moving_speed_mps == run_one(task).moving_speed_mps
+            assert outcome.moving_speed_mps is not None
+
     def test_mouse_hazards_ignored(self, mocker: MockerFixture) -> None:
         """Verify queued mouse events do not change the run."""
         _mock_gl(mocker)

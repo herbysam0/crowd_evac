@@ -322,3 +322,6 @@ from stochastic position spread.  At 10 % a visible initial cluster forms near
 the sign-directed exit before the crowd re-routes upon encountering the block
 or hazard.
 """
+
+MOVING_SPEED_EPS_MPS: float = 0.05
+"""Speed floor (m/s) below which an agent is treated as stationary, not walking."""

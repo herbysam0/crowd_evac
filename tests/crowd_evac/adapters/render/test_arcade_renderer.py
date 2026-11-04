@@ -16,6 +16,9 @@ marked ``@pytest.mark.render`` and skipped in headless CI.  Run them with::
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
+from typing import TYPE_CHECKING
+from unittest.mock import MagicMock
 
 import numpy as np
 import numpy.testing as npt
@@ -28,9 +31,17 @@ from crowd_evac.adapters.render.arcade_renderer import (
     ArcadeRenderer,
     build_agent_render_items,
 )
+from crowd_evac.adapters.io.hazard_catalog import (
+    HazardType,
+    load_hazard_types,
+)
 from crowd_evac.domain.constants import AGENT_RADIUS
 from crowd_evac.application.simulation import SimSnapshot
 from crowd_evac.domain.floor_plan import Exit, ExitSide, FloorPlan
+from crowd_evac.domain.panic_source import PanicSource
+
+if TYPE_CHECKING:
+    from pytest_mock import MockerFixture
 
 
 # ---------------------------------------------------------------------------
@@ -526,3 +537,63 @@ class TestArcadeRendererResizeGL:
             assert first.width == pytest.approx(2 * AGENT_RADIUS * 20.0)
         finally:
             window.close()
+
+
+class TestHazardIcons:
+    """Icons come from the hazard type catalog, not from code."""
+
+    @staticmethod
+    def _draw(
+        floor_plan: FloorPlan,
+        source_type: str,
+        types: dict[str, HazardType],
+        mocker: MockerFixture,
+    ) -> MagicMock:
+        """Draw one active source and return the mocked draw_text."""
+        renderer = ArcadeRenderer(
+            floor_plan, headless=True, hazard_types=types
+        )
+        mocker.patch("arcade.draw_circle_filled")
+        draw_text = mocker.patch("arcade.draw_text")
+        source = PanicSource(2.0, 2.0, source_type=source_type)
+        renderer._draw_panic_sources((source,))  # noqa: SLF001
+        return draw_text  # type: ignore[no-any-return]
+
+    def test_icon_from_type_file(
+        self, floor_plan: FloorPlan, tmp_path: Path, mocker: MockerFixture
+    ) -> None:
+        """Verify a type loaded from a temporary file draws its symbol."""
+        (tmp_path / "smoke.json").write_text(
+            '{"label": "Smoke", "symbol": "S", "symbol_size_m": 2.0}',
+            encoding="utf-8",
+        )
+        types = load_hazard_types(tmp_path)
+        draw_text = self._draw(floor_plan, "smoke", types, mocker)
+        assert draw_text.call_count == 1
+        assert draw_text.call_args.args[0] == "S"
+
+    def test_unknown_type_draws_circle_only(
+        self, floor_plan: FloorPlan, mocker: MockerFixture
+    ) -> None:
+        """Verify a type with no file gets no icon and no error."""
+        draw_text = self._draw(floor_plan, "ghost", {}, mocker)
+        assert draw_text.call_count == 0
+
+    def test_type_without_symbol_draws_circle_only(
+        self, floor_plan: FloorPlan, mocker: MockerFixture
+    ) -> None:
+        """Verify a symbol-less type draws no text."""
+        types = {"gas": HazardType(name="gas", label="Gas")}
+        assert self._draw(floor_plan, "gas", types, mocker).call_count == 0
+
+    def test_default_catalog_has_fire_icon(
+        self, floor_plan: FloorPlan, mocker: MockerFixture
+    ) -> None:
+        """Verify the shipped catalog keeps the fire icon by default."""
+        renderer = ArcadeRenderer(floor_plan, headless=True)
+        mocker.patch("arcade.draw_circle_filled")
+        draw_text = mocker.patch("arcade.draw_text")
+        renderer._draw_panic_sources(  # noqa: SLF001
+            (PanicSource(2.0, 2.0, source_type="fire"),)
+        )
+        assert draw_text.call_args.args[0] == "\U0001f525"

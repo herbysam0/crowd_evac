@@ -29,6 +29,8 @@ class RunOutcome:
         total: Persons that started.
         last_evac_s: Time (s) the last person left; ``None`` if nobody did.
         exits_per_tick: Persons leaving at each tick, from tick 1 on.
+        moving_speed_mps: Mean speed (m/s) of moving persons over the run;
+            ``None`` if nobody moved.
     """
 
     run_index: int
@@ -39,6 +41,7 @@ class RunOutcome:
     total: int
     last_evac_s: float | None
     exits_per_tick: tuple[int, ...]
+    moving_speed_mps: float | None = None
 
     @property
     def complete(self) -> bool:
@@ -55,7 +58,8 @@ class RunSummary:
     """Time-to-last-evacuation statistics over complete runs only.
 
     Incomplete runs are counted, not averaged: mixing them in would hide
-    trapped agents.
+    trapped agents.  Speed statistics are the exception: they cover every
+    run with a value, since a trapped agent's walking speed is still valid.
 
     Attributes:
         complete: Runs where everyone left.
@@ -65,6 +69,9 @@ class RunSummary:
             than two complete runs.
         min_s: Shortest time (s), or ``None``.
         max_s: Longest time (s), or ``None``.
+        speed_mean_mps: Mean of per-run moving speeds, or ``None``.
+        speed_std_mps: Sample standard deviation of per-run moving speeds;
+            ``None`` with fewer than two values.
     """
 
     complete: int
@@ -73,6 +80,8 @@ class RunSummary:
     std_s: float | None
     min_s: float | None
     max_s: float | None
+    speed_mean_mps: float | None = None
+    speed_std_mps: float | None = None
 
 
 @dataclass(frozen=True, eq=False)
@@ -126,6 +135,7 @@ def make_outcome(
     hazards: tuple[EmergencyEventData, ...],
     total: int,
     exits_per_tick: Sequence[int],
+    moving_speed_mps: float | None = None,
 ) -> RunOutcome:
     """Build a :class:`RunOutcome` from a run's exits-per-tick series.
 
@@ -135,6 +145,7 @@ def make_outcome(
         hazards: Hazards given to the run.
         total: Persons that started.
         exits_per_tick: Persons leaving at ticks 1, 2, ...
+        moving_speed_mps: Mean moving speed of the run, if measured.
 
     Returns:
         The outcome.  A hazard counts as fired when its tick is before the
@@ -153,6 +164,7 @@ def make_outcome(
         total=total,
         last_evac_s=last,
         exits_per_tick=exits,
+        moving_speed_mps=moving_speed_mps,
     )
 
 
@@ -170,9 +182,16 @@ def summarize(outcomes: Sequence[RunOutcome]) -> RunSummary:
         o.last_evac_s for o in outcomes
         if o.complete and o.last_evac_s is not None
     ]
+    speeds = [
+        o.moving_speed_mps for o in outcomes
+        if o.moving_speed_mps is not None
+    ]
+    speed_mean, speed_std = _mean_std(speeds)
     incomplete = len(outcomes) - len(times)
     if not times:
-        return RunSummary(0, incomplete, None, None, None, None)
+        return RunSummary(
+            0, incomplete, None, None, None, None, speed_mean, speed_std
+        )
     arr = np.asarray(times, dtype=np.float64)
     std = float(arr.std(ddof=1)) if len(times) > 1 else None
     return RunSummary(
@@ -182,7 +201,18 @@ def summarize(outcomes: Sequence[RunOutcome]) -> RunSummary:
         std_s=std,
         min_s=float(arr.min()),
         max_s=float(arr.max()),
+        speed_mean_mps=speed_mean,
+        speed_std_mps=speed_std,
     )
+
+
+def _mean_std(values: Sequence[float]) -> tuple[float | None, float | None]:
+    """Return the mean and sample std dev (``None`` when undefined)."""
+    if not values:
+        return None, None
+    arr = np.asarray(values, dtype=np.float64)
+    std = float(arr.std(ddof=1)) if len(values) > 1 else None
+    return float(arr.mean()), std
 
 
 def build_curves(outcomes: Sequence[RunOutcome]) -> EvacuationCurves:

@@ -17,6 +17,7 @@ from crowd_evac.application.cli import (
 )
 from crowd_evac.application.injection import apply_due_events, events_by_tick
 from crowd_evac.metrics.records import make_record
+from crowd_evac.metrics.speed import MovingSpeedTally
 from crowd_evac.montecarlo.results import RunOutcome, make_outcome
 from crowd_evac.montecarlo.runner import RunTask
 from crowd_evac.optimization.harness import DEFAULT_MAX_TICKS
@@ -51,7 +52,8 @@ class MonteCarloWindow(EvacWindow):
         Args:
             tasks: Runs to play; must not be empty.
             notify: Called with each finished run.
-            should_cancel: Polled between runs; ``True`` stops the batch.
+            should_cancel: Polled every tick; ``True`` closes the window and
+                drops the unfinished run.
         """
         first = tasks[0]
         sim, floor_plan = build_simulation_from_scenario(
@@ -66,6 +68,7 @@ class MonteCarloWindow(EvacWindow):
         self._should_cancel = should_cancel
         self._index = 0
         self._exits: list[int] = []
+        self._speed = MovingSpeedTally()
         self.outcomes: list[RunOutcome] = []
         self.finished = False
         self._label: arcade.Text | None = None
@@ -77,13 +80,20 @@ class MonteCarloWindow(EvacWindow):
     def on_update(self, delta_time: float) -> None:
         """Advance the current run one tick, or finish it.
 
-        Mirrors the headless loop: a run ends when the simulation reports
-        completion or the tick cap is hit; hazards fire before each step.
+        Cancel is checked first.  Mirrors the headless loop: a run ends
+        when the simulation reports completion or the tick cap is hit;
+        hazards fire before each step.
 
         Args:
             delta_time: Ignored; the simulation steps at a fixed ``DT``.
         """
         if self.finished:
+            return
+        if self._should_cancel():
+            # Cancel must not wait for the current run to play out; the
+            # unfinished run is discarded.
+            self.finished = True
+            self.close()
             return
         sim = self._sim
         if sim.is_complete or sim.tick >= DEFAULT_MAX_TICKS:
@@ -93,7 +103,9 @@ class MonteCarloWindow(EvacWindow):
         # Mouse hazards would make the batch irreproducible; drop them.
         self._input_source.poll()
         sim.step()
-        record = make_record(sim.snapshot(), self._tasks[self._index].agents)
+        snap = sim.snapshot()
+        record = make_record(snap, self._tasks[self._index].agents)
+        self._speed.add(snap)
         self._exits.append(record["egressed_this_tick"])
 
     def on_draw(self) -> None:
@@ -117,7 +129,8 @@ class MonteCarloWindow(EvacWindow):
         """Record the finished run, then start the next or close."""
         task = self._tasks[self._index]
         outcome = make_outcome(
-            task.run_index, task.seed, task.events, task.agents, self._exits
+            task.run_index, task.seed, task.events, task.agents, self._exits,
+            self._speed.mean_mps,
         )
         self.outcomes.append(outcome)
         self._notify(outcome)
@@ -138,6 +151,7 @@ class MonteCarloWindow(EvacWindow):
         self._schedule = events_by_tick(task.events)
         self._current_source = None
         self._exits = []
+        self._speed = MovingSpeedTally()
 
 
 def run_visual(
@@ -150,7 +164,7 @@ def run_visual(
     Args:
         tasks: Runs to play, in order.
         notify: Called with each finished run.
-        should_cancel: Polled between runs.
+        should_cancel: Polled every tick.
 
     Returns:
         Runs finished when the batch ended; fewer than ``tasks`` if the

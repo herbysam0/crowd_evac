@@ -68,8 +68,8 @@ def build_parser() -> argparse.ArgumentParser:
     """Build the ``crowd-evac`` argument parser.
 
     Returns:
-        The configured parser.  Run options default to ``None`` so
-        :func:`parse_args` can tell whether they were given.
+        The configured parser.  ``--scenario`` and the run options default
+        to ``None`` so :func:`parse_args` can tell whether they were given.
     """
     available = list_bundled_scenarios()
     parser = argparse.ArgumentParser(
@@ -78,11 +78,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "-s", "--scenario",
-        default=DEFAULT_SCENARIO,
+        default=None,
         choices=available,
         metavar="NAME",
-        help=f"bundled room to run (default: {DEFAULT_SCENARIO}); "
-        f"one of: {', '.join(available)}",
+        help="bundled room to run in the game (default: "
+        f"{DEFAULT_SCENARIO}); one of: {', '.join(available)}.  With no "
+        "flags at all the performance dashboard opens instead",
     )
     parser.add_argument(
         "-l", "--list", action="store_true",
@@ -127,24 +128,32 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             ``sys.argv``.
 
     Returns:
-        Namespace with ``scenario`` (validated bundled name), ``list``,
-        ``design``, ``agents`` (int, default
+        Namespace with ``dashboard`` (``True`` when no scenario, run
+        option, ``--list`` or ``--design`` was given), ``scenario``
+        (validated bundled name, default :data:`DEFAULT_SCENARIO`),
+        ``list``, ``design``, ``agents`` (int, default
         :data:`~crowd_evac.domain.constants.DEFAULT_AGENT_COUNT`), ``seed``
         (int, default :data:`~crowd_evac.domain.constants.DEFAULT_SPAWN_SEED`)
         and ``hazard`` (list of events, possibly empty).  Exits with status 2
         via argparse on any invalid value, if ``--design`` is combined with
-        ``--list`` or a non-default ``--scenario``, or if ``--agents``,
+        ``--list`` or ``--scenario``, or if ``--agents``,
         ``--seed`` or ``--hazard`` is combined with ``--design`` or
         ``--list``.
     """
     parser = build_parser()
     args = parser.parse_args(argv)
-    if args.design and (args.list or args.scenario != DEFAULT_SCENARIO):
+    if args.design and (args.list or args.scenario is not None):
         parser.error("--design cannot be combined with --list or --scenario")
     given = [o for o in _RUN_OPTIONS if getattr(args, o) is not None]
     if given and (args.design or args.list):
         mode = "--design" if args.design else "--list"
         parser.error(f"{mode} cannot be combined with {_RUN_FLAGS}")
+    args.dashboard = (
+        args.scenario is None and not given and not args.list
+        and not args.design
+    )
+    if args.scenario is None:
+        args.scenario = DEFAULT_SCENARIO
     if args.agents is None:
         args.agents = DEFAULT_AGENT_COUNT
     if args.seed is None:

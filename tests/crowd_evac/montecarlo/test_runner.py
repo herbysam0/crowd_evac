@@ -178,6 +178,50 @@ class TestRunMonteCarlo:
             run_monte_carlo(_config(hazards=(spec,)))
 
 
+class TestDirectSeed:
+    """``direct_seed`` uses the base seed as the spawn seed."""
+
+    def test_single_run_uses_exact_seed(self) -> None:
+        """Verify the run's spawn seed is the configured seed itself."""
+        result = run_monte_carlo(_config(runs=1, direct_seed=True))
+        assert result.outcomes[0].seed == _SEED
+        assert result.base_seed == _SEED
+
+    def test_direct_matches_run_one_with_that_seed(self) -> None:
+        """Verify the outcome equals a plain run of that seed."""
+        result = run_monte_carlo(_config(runs=1, agents=3, direct_seed=True))
+        task = RunTask(_ROOM, 3, 0, _SEED, ())
+        assert result.outcomes[0] == run_one(task)
+
+    def test_default_path_unchanged(self) -> None:
+        """Verify without the flag a single run still derives its seed."""
+        result = run_monte_carlo(_config(runs=1))
+        assert result.outcomes[0].seed == derive_seeds(_SEED, 1)[0]
+        assert result.outcomes[0].seed != _SEED
+
+    def test_more_than_one_run_rejected(self) -> None:
+        """Verify direct_seed with several runs raises ValueError."""
+        with pytest.raises(ValueError, match="direct_seed"):
+            _config(runs=2, direct_seed=True)
+
+    def test_random_seed_is_drawn_and_used(self) -> None:
+        """Verify a blank seed is drawn, flagged, and used as spawn seed."""
+        result = run_monte_carlo(_config(runs=1, seed=None, direct_seed=True))
+        assert result.seed_was_random
+        assert result.outcomes[0].seed == result.base_seed
+
+
+class TestSpeedPassThrough:
+    """Headless runs report a moving speed."""
+
+    def test_outcome_has_moving_speed(self) -> None:
+        """Verify a finished run carries a positive moving speed."""
+        result = run_monte_carlo(_config(runs=1))
+        speed = result.outcomes[0].moving_speed_mps
+        assert speed is not None and speed > 0.0
+        assert result.summary.speed_mean_mps == pytest.approx(speed)
+
+
 class TestHeadlessImport:
     """Headless batches must not need a display stack."""
 
