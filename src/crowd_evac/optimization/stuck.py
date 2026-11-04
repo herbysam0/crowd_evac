@@ -74,7 +74,7 @@ STUCK_MIN_STALL_S: float = 2.0
 A momentary stop (one agent yielding for a tick, a brief jostle) is normal
 crowd behaviour; only a stall held continuously for this long with a clear
 path is a deadlock.  Deliberately shorter than the global
-:data:`~crowd_evac.domain.constants.STALL_TICKS` (10 s) so a *single* trapped
+:data:`~crowd_evac.domain.constants.STALL_TICKS` (60 s) so a *single* trapped
 agent is caught well before the whole evacuation is declared stalled.
 """
 

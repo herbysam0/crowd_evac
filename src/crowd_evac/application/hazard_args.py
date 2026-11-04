@@ -66,8 +66,21 @@ def _to_bool(key: str, text: str) -> bool:
     raise HazardSpecError(f"{key}={text!r} must be true or false")
 
 
-def _split_pairs(spec: str) -> dict[str, str]:
-    """Split ``k=v,k=v`` into a dict, rejecting duplicates and bad pairs."""
+def split_pairs(spec: str) -> dict[str, str]:
+    """Split ``k=v,k=v`` into a dict, rejecting duplicates and bad pairs.
+
+    Public so the Monte Carlo ``--hazard`` parser can reuse the same grammar.
+
+    Args:
+        spec: Comma-separated ``key=value`` text.
+
+    Returns:
+        Mapping of key to its (stripped) value text, in order of appearance.
+
+    Raises:
+        HazardSpecError: On a pair without ``=``, an empty key or a
+            duplicate key.
+    """
     pairs: dict[str, str] = {}
     for item in spec.split(","):
         key, sep, value = item.partition("=")
@@ -97,8 +110,12 @@ def _optional_fields(pairs: dict[str, str]) -> dict[str, Any]:
     return fields
 
 
-def _check_ranges(event: dict[str, Any]) -> None:
-    """Fail now, not mid-run, on out-of-range hazard values."""
+def check_event_ranges(event: dict[str, Any]) -> None:
+    """Fail now, not mid-run, on out-of-range hazard values.
+
+    Raises:
+        HazardSpecError: If :class:`PanicSource` rejects the event values.
+    """
     try:
         PanicSource(
             x=event["pos"][0],
@@ -137,7 +154,7 @@ def parse_hazard(spec: str) -> EmergencyEventData:
         >>> parse_hazard("x=1,y=2,tick=5")["pos"]
         [1.0, 2.0]
     """
-    pairs = _split_pairs(spec)
+    pairs = split_pairs(spec)
     known = {*_REQUIRED_HAZARD_KEYS, "tick", *_FLOAT_HAZARD_KEYS,
              "blocks_navigation", "source_type"}
     unknown = sorted(set(pairs) - known)
@@ -162,7 +179,7 @@ def parse_hazard(spec: str) -> EmergencyEventData:
         "pos": [_to_float("x", pairs["x"]), _to_float("y", pairs["y"])],
     }
     event.update(_optional_fields(pairs))
-    _check_ranges(event)
+    check_event_ranges(event)
     return cast(EmergencyEventData, event)
 
 
