@@ -214,15 +214,18 @@ limit: they get only the small changes above and aren't split here.
    - Headless child doesn't import arcade.
    - `render` marker: visual speed matches headless; per-tick cancel closes the window
      and drops the unfinished run; renderer draws an icon from a temporary type file;
-     dashboard opens, Add and Remove work, a bad field shows its error, chart caches.
+     dashboard opens, Add and Remove work, a bad field shows its error, chart caches;
+     a `KeyboardInterrupt` in the event loop cancels the batch and closes the window
+     without raising.
 3. Integration Tests:
    - Dashboard batch with a randomized hazard runs under a real `spawn` child and fills
      results, without re-running `main` in any process.
    - Same config and seed from the dashboard and `run_monte_carlo` give equal outcomes.
    - Single run with seed 7 spawns the same positions as the game's `--seed 7`.
 4. Manual acceptance **[YOU DO]**: `python -m crowd_evac`, then a visual Monte Carlo
-   batch with a hazard; resize; Cancel; close the sim window early; add a `smoke.json`
-   and reopen.
+   batch with a hazard; resize; Cancel; close the sim window early; press Ctrl+C in the
+   terminal with a headless batch, a visual batch and no batch running; add a
+   `smoke.json` and reopen.
 
 Agent runs named test files only. Full-suite runs belong to the user:
 ```powershell
@@ -233,6 +236,8 @@ Agent runs named test files only. Full-suite runs belong to the user:
 
 ## Files to Modify
 - `src/crowd_evac/__main__.py`: main guard.
+- Ctrl+C handling lives in `dashboard_window.py::run_dashboard` and the child's
+  `batch_process.py::_child_main` (ignores the console's SIGINT; the parent cancels).
 - `src/crowd_evac/application/cli.py`: open the dashboard.
 - `src/crowd_evac/application/cli_args.py`: `--scenario` default `None`, `args.dashboard`.
 - `src/crowd_evac/adapters/render/arcade_renderer.py`: icons from the catalog.
@@ -288,6 +293,8 @@ Agent runs named test files only. Full-suite runs belong to the user:
 - [ ] Visual batches play in a separate window while the dashboard stays responsive;
       headless and visual results are equal, including speed.
 - [ ] Cancel keeps finished runs in both modes.
+- [ ] Ctrl+C in the terminal closes the dashboard like the close button: the batch is
+      cancelled, no traceback is printed, no child process is left behind.
 - [ ] Single run with seed S spawns as game `--seed S`; CLI Monte Carlo results for a
       given seed are unchanged.
 - [ ] No new dependency. New files under 300 lines.
