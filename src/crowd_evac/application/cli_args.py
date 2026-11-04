@@ -30,10 +30,13 @@ _RUN_FLAGS: str = "--agents, --seed or --hazard"
 # ---------------------------------------------------------------------------
 
 
-def _checked(
+def checked(
     convert: Callable[[str], Any],
 ) -> Callable[[str], Any]:
-    """Wrap a converter so ``ValueError`` becomes an argparse type error."""
+    """Wrap a converter so ``ValueError`` becomes an argparse type error.
+
+    Public so the Monte Carlo CLI shares the same argument checks.
+    """
 
     def wrapper(text: str) -> Any:
         try:
@@ -45,8 +48,11 @@ def _checked(
     return wrapper
 
 
-def _int_at_least(minimum: int) -> Callable[[str], int]:
-    """Build an integer converter enforcing ``value >= minimum``."""
+def int_at_least(minimum: int) -> Callable[[str], int]:
+    """Build an integer converter enforcing ``value >= minimum``.
+
+    Public so the Monte Carlo CLI shares the same argument checks.
+    """
 
     def convert(text: str) -> int:
         value = int(text)
@@ -88,21 +94,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--agents",
-        type=_checked(_int_at_least(MIN_AGENTS)),
+        type=checked(int_at_least(MIN_AGENTS)),
         default=None,
         metavar="N",
         help=f"number of agents to spawn (default: {DEFAULT_AGENT_COUNT})",
     )
     parser.add_argument(
         "--seed",
-        type=_checked(_int_at_least(0)),
+        type=checked(int_at_least(0)),
         default=None,
         metavar="S",
         help=f"spawn RNG seed, >= 0 (default: {DEFAULT_SPAWN_SEED})",
     )
     parser.add_argument(
         "--hazard",
-        type=_checked(parse_hazard),
+        type=checked(parse_hazard),
         action="append",
         default=None,
         metavar="K=V,...",

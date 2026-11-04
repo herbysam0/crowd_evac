@@ -92,6 +92,53 @@ fire command above.
 An unknown name is rejected with the list of valid choices. Without
 `--scenario`, the default is `lecture_hall`.
 
+## Monte Carlo Testing
+
+`scripts/monte_carlo.py` runs one room many times and reports how long the
+last person took to leave. Each run gets its own spawn seed, and hazards can
+vary per run.
+
+```powershell
+python scripts/monte_carlo.py
+python scripts/monte_carlo.py -s lecture_hall --agents 150 --runs 50 --seed 7
+python scripts/monte_carlo.py --agents 150 --hazard x=10..40,y=2..28,tick=0..400,source_type=fire
+python scripts/monte_carlo.py --runs 5 --visual
+```
+
+| Flag | Meaning | Default |
+|---|---|---|
+| `-s`, `--scenario NAME` | bundled room | `lecture_hall` |
+| `--agents N` | persons per run (N >= 1) | 1 |
+| `--runs N` | number of runs (N >= 1) | 20 |
+| `--visual` | play the runs in a window, one after another | headless |
+| `--seed S` | base seed (S >= 0) | random, printed in the report |
+| `--hazard K=V,...` | hazard, repeatable | none |
+
+`--hazard` extends the game flag: `x`, `y` and `tick` take a value or a range
+`lo..hi`, sampled once per run. Any other key stays a fixed value. `x` and `y`
+are required (for the whole room, pass its bounds, e.g. `x=0..50`). `tick` is
+in simulation ticks of 0.05 s, so `tick=100` is 5 s. A reversed range, a range
+on another key, or a bound outside the room is a usage error. A sampled
+position inside a wall is redrawn; a fixed position inside a wall is accepted.
+A hazard whose tick falls after the run ended never fires; the report shows
+this in the `Hazards fired` column.
+
+The report lists every run with its seed, then the mean, sample standard
+deviation, minimum and maximum time to last evacuation. Only runs where
+everyone left are averaged; the others are counted as incomplete. The last
+line is the elapsed wall-clock time. The same base seed and options give the
+same report, headless or visual, except for that line. To replay one
+run in the game, use its seed with `--seed` and its sampled hazard (printed
+below the table) as a fixed `--hazard`.
+
+A run ends when everyone has left, when 60 s pass without anyone leaving, or
+after 10,000 ticks. The 60 s limit (`STALL_TICKS`, 1200 ticks) applies to the
+game too: it used to be 10 s, which cut off long single-person walks.
+
+The dashboard will call `crowd_evac.montecarlo.runner.run_monte_carlo`
+directly; its result also carries the data for the evacuated-versus-time
+graph.
+
 ### Migrating schema-1.0 files
 
 Version 1.0 files (with `agents`, `simulation` or `events` blocks) are
@@ -127,6 +174,7 @@ src/crowd_evac/
 ├── application/   # Fixed-step loop, orchestration, injection API
 ├── scenarios/     # Default scenario data and schema
 ├── metrics/       # Per-tick measurement records
+├── montecarlo/    # Monte Carlo batches (scripts/monte_carlo.py)
 ├── ports/         # Domain-level interfaces
 └── adapters/
     ├── render/    # Arcade rendering backend

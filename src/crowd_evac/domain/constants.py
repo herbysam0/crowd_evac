@@ -18,7 +18,7 @@ DT: float = 0.05
 
 # -- Agent dynamics (FR-1: speed, accel limits) — calibrated R0.3 ----------
 
-MAX_SPEED: float = 2.429916430805863
+MAX_SPEED: float = 2.429916430805863  # measured average speed is 0.91 m/sec
 """Maximum agent speed in meters per second.
 
 Calibrated: Phase-2 NSGA-II winner (realism_distance=0.266, stuck_count=0).
@@ -216,14 +216,19 @@ segment (not the centre), so wide exits capture approaching agents
 uniformly along their full lateral span.
 """
 
-STALL_TICKS: int = 200
+STALL_TICKS: int = 1200
 """Consecutive no-egress ticks before declaring the evacuation stalled.
 
-At the default DT of 0.05 s this equals 10 simulated seconds.  After this
+At the default DT of 0.05 s this equals 60 simulated seconds.  After this
 many consecutive ticks with zero egress the remaining alive agents are
 considered trapped and
 :func:`~crowd_evac.application.termination.is_evacuation_complete` returns
 ``True`` (R5.3).
+
+Sized above the longest walk to an exit in the bundled rooms (16.2 s for one
+agent in ``lecture_hall``): a shorter limit ended runs with agents still
+walking.  It is a time limit, not progress detection, so a room whose walk
+exceeds 60 s would still stop early.
 """
 
 # -- Run defaults ----------------------------------------------------------
