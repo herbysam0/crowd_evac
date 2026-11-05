@@ -255,6 +255,6 @@ def _build_exit(data: ExitData, source: str) -> Exit:
         y=float(data["y"]),
         width_m=float(data["width_m"]),
         side=side,
-        capacity_per_second=int(data["capacity_per_second"]),
+        capacity_per_second=float(data["capacity_per_second"]),
         label=str(data.get("label", "")),
     )

@@ -35,7 +35,7 @@ def selected_values(
         "x": x,
         "y": y,
         "width_m": d.width_m,
-        "capacity_per_second": float(d.capacity_per_second),
+        "capacity_per_second": d.capacity_per_second,
     }
 
 
@@ -89,5 +89,5 @@ def _edit_doorway(
     elif field == "width_m":
         width = value
     else:
-        capacity = int(value)
+        capacity = float(value)
     model.edit_doorway(door_id, centre, width, capacity)

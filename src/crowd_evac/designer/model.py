@@ -28,7 +28,7 @@ from crowd_evac.designer.layout import (
 
 DEFAULT_ROOM_WIDTH_M: float = 15.0
 DEFAULT_ROOM_HEIGHT_M: float = 10.0
-DEFAULT_DOOR_CAPACITY: int = 20
+DEFAULT_DOOR_CAPACITY: float = 1.05
 
 
 class DesignModel:
@@ -167,7 +167,7 @@ class DesignModel:
         wall_id: int,
         center: float,
         width_m: float,
-        capacity_per_second: int = DEFAULT_DOOR_CAPACITY,
+        capacity_per_second: float = DEFAULT_DOOR_CAPACITY,
     ) -> Doorway:
         """Add a doorway on a perimeter wall; return it.
 
@@ -185,7 +185,7 @@ class DesignModel:
         door_id: int,
         center: float,
         width_m: float,
-        capacity_per_second: int,
+        capacity_per_second: float,
     ) -> Doorway:
         """Replace a doorway's centre, width and capacity."""
         new = replace(

@@ -86,7 +86,7 @@ class Exit:
     y: float
     width_m: float
     side: ExitSide
-    capacity_per_second: int
+    capacity_per_second: float
     label: str = ""
 
 
@@ -266,7 +266,7 @@ def _validate(fp: FloorPlan) -> None:
         if exit_.capacity_per_second <= 0:
             raise ScenarioValidationError(
                 f"Exit '{exit_.label}' capacity_per_second must be a positive "
-                f"integer, got {exit_.capacity_per_second!r}"
+                f"number, got {exit_.capacity_per_second!r}"
             )
 
 

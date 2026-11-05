@@ -52,13 +52,13 @@ class TestExitData:
         assert exit_["capacity_per_second"] == 5
         assert exit_["side"] == "south"
 
-    def test_exit_data_capacity_is_int(self) -> None:
-        """Verify capacity_per_second is typed as int, not float."""
+    def test_exit_data_capacity_accepts_fraction(self) -> None:
+        """Verify capacity_per_second may be fractional (persons/s)."""
         exit_: ExitData = {
             "x": 5.0, "y": 0.0, "width_m": 2.0,
-            "side": "north", "capacity_per_second": 3,
+            "side": "north", "capacity_per_second": 1.05,
         }
-        assert isinstance(exit_["capacity_per_second"], int)
+        assert exit_["capacity_per_second"] == 1.05
 
     def test_exit_data_accepts_all_sides(self) -> None:
         """Verify all four cardinal sides are accepted values."""

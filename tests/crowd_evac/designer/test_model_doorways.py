@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from crowd_evac.designer.model import DesignModel
+from crowd_evac.designer.model import DEFAULT_DOOR_CAPACITY, DesignModel
 from crowd_evac.domain.errors import DesignValidationError
 
 from .helpers import ROOM_W, snapshot
@@ -28,8 +28,15 @@ class TestDoorways:
     def test_doorway_default_capacity_positive(
         self, model: DesignModel, bottom: int
     ) -> None:
-        """Verify the default capacity is a positive int."""
-        assert model.add_doorway(bottom, 5, 2).capacity_per_second > 0
+        """Verify the default capacity is the 1.05 persons/s default."""
+        door = model.add_doorway(bottom, 5, 2)
+        assert door.capacity_per_second == DEFAULT_DOOR_CAPACITY == 1.05
+
+    def test_doorway_accepts_fractional_capacity(
+        self, model: DesignModel, bottom: int
+    ) -> None:
+        """Verify a fractional capacity is stored unchanged."""
+        assert model.add_doorway(bottom, 5, 2, 2.5).capacity_per_second == 2.5
 
     def test_doorway_at_wall_end_extends_outward(
         self, model: DesignModel

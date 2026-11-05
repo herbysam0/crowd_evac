@@ -81,7 +81,7 @@ class Doorway:
     wall_id: int
     center: float
     width_m: float
-    capacity_per_second: int
+    capacity_per_second: float
 
 
 @dataclass(frozen=True)

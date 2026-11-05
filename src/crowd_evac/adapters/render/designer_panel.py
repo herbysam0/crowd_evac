@@ -217,7 +217,7 @@ class DesignerPanel:
         if width is not None:
             self._ctl.door_width_m = width
         if cap is not None:
-            self._ctl.door_capacity = int(cap)
+            self._ctl.door_capacity = cap
 
     def is_typing(self) -> bool:
         """Return True while any text field has keyboard focus."""

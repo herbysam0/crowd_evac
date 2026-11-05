@@ -115,6 +115,22 @@ class TestLoadScenarioFileHappyPath:
         assert exit_.capacity_per_second == 5
         assert exit_.label == "main_exit"
 
+    def test_fractional_capacity_parsed_as_float(
+        self, tmp_path: Path, valid_scenario_dict: dict[str, object]
+    ) -> None:
+        """Verify capacity_per_second 1.05 loads as float, int still accepted."""
+        fp_data = valid_scenario_dict["floor_plan"]
+        assert isinstance(fp_data, dict)
+        fp_data["exits"][0]["capacity_per_second"] = 1.05
+        path = tmp_path / "frac.json"
+        path.write_text(json.dumps(valid_scenario_dict), encoding="utf-8")
+        floor_plan, _ = load_scenario_file(path)
+        assert floor_plan.exits[0].capacity_per_second == 1.05
+        fp_data["exits"][0]["capacity_per_second"] = 3
+        path.write_text(json.dumps(valid_scenario_dict), encoding="utf-8")
+        floor_plan, _ = load_scenario_file(path)
+        assert isinstance(floor_plan.exits[0].capacity_per_second, float)
+
     def test_scenario_data_is_room_only(self, scenario_file: Path) -> None:
         """Verify ScenarioData carries only version, name and floor plan."""
         _, data = load_scenario_file(scenario_file)

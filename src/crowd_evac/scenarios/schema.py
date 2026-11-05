@@ -38,7 +38,7 @@ class ExitData(TypedDict):
     y: float
     width_m: float
     side: Literal["north", "south", "east", "west"]
-    capacity_per_second: int
+    capacity_per_second: float
     label: NotRequired[str]
 
 
