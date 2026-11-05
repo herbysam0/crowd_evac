@@ -388,6 +388,11 @@ class EvacWindow(arcade.Window):
         self._renderer.set_viewport(vp.ppm, vp.ox, vp.oy)
         self._input_source.set_viewport(vp, fp.width_m, fp.height_m)
 
+    @property
+    def sim_running(self) -> bool:
+        """Whether the simulation is advancing (not paused or complete)."""
+        return self._sim_state == _SimState.RUNNING
+
     # ------------------------------------------------------------------
     # Arcade callbacks
     # ------------------------------------------------------------------

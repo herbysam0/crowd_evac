@@ -115,7 +115,9 @@ as they arrive. Settings:
 | Seed | blank draws a random seed, shown in the results | blank |
 | Iterations | runs of a Monte Carlo batch (>= 1) | 20 |
 
-**Run single** uses the seed exactly, like the game's `--seed`. **Run Monte
+**Run single** uses the seed exactly, like the game's `--seed`. In visual mode
+it opens paused, like the game: press SPACE to start, pause and continue.
+**Run Monte
 Carlo** uses it as the base seed, like `scripts/monte_carlo.py`. Each batch runs
 in its own process, so the dashboard stays responsive while a visual batch plays;
 Cancel keeps the runs that already finished. Results are not saved; a new batch

@@ -51,7 +51,7 @@ agents accelerate toward their desired velocity quickly — consistent with
 a high-urgency evacuation context.
 """
 
-AGENT_RADIUS: float = 0.55  # fixed physical property — not optimised
+AGENT_RADIUS: float = 0.28  # diameter is 55cm. fixed physical property — not optimised
 """Personal-space radius of a single agent in meters.
 
 Two agents are considered overlapping when their centre distance drops below

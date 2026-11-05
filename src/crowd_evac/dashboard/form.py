@@ -156,7 +156,8 @@ def build_config(
     """Validate the whole form and build the batch settings.
 
     Single run: ``runs=1`` with ``direct_seed`` so the seed matches the
-    game's ``--seed``.  Monte Carlo: the seed is the base seed.
+    game's ``--seed``, and ``start_paused`` so a visual run waits for SPACE
+    like the game.  Monte Carlo: the seed is the base seed.
 
     Args:
         fields: Form text.
@@ -194,6 +195,9 @@ def build_config(
         visual=fields.visual, seed=seed,
         hazards=tuple(s for s in specs if s is not None),
         max_workers=max_workers, direct_seed=not monte_carlo,
+        # A single visual run waits for SPACE like the game; a batch plays
+        # on its own.  Headless runs ignore the flag.
+        start_paused=not monte_carlo,
     )
 
 

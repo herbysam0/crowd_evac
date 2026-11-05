@@ -69,6 +69,14 @@ class TestDefaults:
         assert cfg.direct_seed is True
         assert cfg.seed == 7
 
+    def test_single_run_starts_paused_batch_does_not(self) -> None:
+        """Verify only a single run waits for SPACE."""
+        fields = FormFields(visual=True)
+        single = build_config(fields, monte_carlo=False, scenarios=_ROOMS)
+        batch = build_config(fields, monte_carlo=True, scenarios=_ROOMS)
+        assert single.start_paused is True
+        assert batch.start_paused is False
+
     def test_blank_seed_is_random(self) -> None:
         """Verify a whitespace seed means None."""
         cfg = build_config(

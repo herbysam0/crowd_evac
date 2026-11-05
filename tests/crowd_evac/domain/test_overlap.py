@@ -148,11 +148,11 @@ class TestWallClearance:
     ) -> None:
         """An agent within a radius of the wall is pushed out to exactly R.
 
-        The wall column starts at x = 2.0; an agent at x = 1.7 is 0.3 m from it
-        (< 0.55 m) and must be pushed to x = 2.0 - 0.55 = 1.45.
+        The wall column starts at x = 2.0; an agent half a radius from it is
+        inside the clearance and must be pushed to x = 2.0 - AGENT_RADIUS.
         """
         cmap = _wall_column_map()
-        state = make_state([[1.7, 0.5]])
+        state = make_state([[2.0 - 0.5 * AGENT_RADIUS, 0.5]])
         prev = state.pos.copy()
         resolve_overlaps(state, cmap, prev, iterations=4)
         assert state.pos[0, 0] == pytest.approx(2.0 - WALL_CLEARANCE)

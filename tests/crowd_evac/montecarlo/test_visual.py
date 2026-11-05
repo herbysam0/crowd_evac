@@ -166,6 +166,91 @@ class TestWindowLogic:
         assert window._sim.tick == 1
 
 
+class TestStartPaused:
+    """A single run can wait for SPACE, like the game."""
+
+    def test_waits_for_space_before_first_tick(
+        self, mocker: MockerFixture
+    ) -> None:
+        """Verify nothing advances until SPACE is pressed."""
+        _mock_gl(mocker)
+        window = MonteCarloWindow(
+            _tasks(1), _Collector(), lambda: False, start_paused=True
+        )
+        for _ in range(5):
+            window.on_update(_FRAME_S)
+        assert window._sim.tick == 0
+        assert not window.sim_running
+
+    def test_space_starts_pauses_and_continues(
+        self, mocker: MockerFixture
+    ) -> None:
+        """Verify SPACE cycles start, pause and continue."""
+        _mock_gl(mocker)
+        window = MonteCarloWindow(
+            _tasks(1), _Collector(), lambda: False, start_paused=True
+        )
+        window.on_key_press(arcade_space(), 0)
+        window.on_update(_FRAME_S)
+        assert window._sim.tick == 1
+        window.on_key_press(arcade_space(), 0)
+        window.on_update(_FRAME_S)
+        assert window._sim.tick == 1
+        window.on_key_press(arcade_space(), 0)
+        window.on_update(_FRAME_S)
+        assert window._sim.tick == 2
+
+    def test_pausing_does_not_change_outcome(
+        self, mocker: MockerFixture
+    ) -> None:
+        """Verify a run paused midway equals the uninterrupted run."""
+        _mock_gl(mocker)
+        tasks = _tasks(1)
+        window = MonteCarloWindow(
+            tasks, _Collector(), lambda: False, start_paused=True
+        )
+        window.on_key_press(arcade_space(), 0)
+        for _ in range(7):
+            window.on_update(_FRAME_S)
+        window.on_key_press(arcade_space(), 0)
+        for _ in range(7):
+            window.on_update(_FRAME_S)
+        window.on_key_press(arcade_space(), 0)
+        _drive(window)
+        assert window.outcomes[0] == run_one(tasks[0])
+
+    def test_cancel_works_while_paused(self, mocker: MockerFixture) -> None:
+        """Verify Cancel closes a window that is still waiting for SPACE."""
+        _mock_gl(mocker)
+        cancel = {"now": False}
+        window = MonteCarloWindow(
+            _tasks(1), _Collector(), lambda: cancel["now"], start_paused=True
+        )
+        window.on_update(_FRAME_S)
+        cancel["now"] = True
+        window.on_update(_FRAME_S)
+        assert window.finished
+        assert window.outcomes == []
+        window.close.assert_called_once()  # type: ignore[attr-defined]
+
+    def test_batch_ignores_start_paused(self, mocker: MockerFixture) -> None:
+        """Verify more than one run still starts by itself."""
+        _mock_gl(mocker)
+        window = MonteCarloWindow(
+            _tasks(2), _Collector(), lambda: False, start_paused=True
+        )
+        window.on_key_press(arcade_space(), 0)
+        window.on_update(_FRAME_S)
+        assert window._sim.tick == 1
+
+
+def arcade_space() -> int:
+    """Return arcade's SPACE key symbol."""
+    import arcade
+
+    return int(arcade.key.SPACE)
+
+
 @pytest.mark.render
 class TestRealWindow:
     """Open an actual arcade window (needs a display)."""
@@ -206,3 +291,18 @@ class TestRealWindow:
         )
         assert result.cancelled
         assert [o.run_index for o in result.outcomes] == [0]
+
+    def test_paused_single_run_draws_and_resumes(self) -> None:
+        """Verify a paused window holds at tick 0, draws, then runs on SPACE."""
+        window = MonteCarloWindow(
+            _tasks(1), _Collector(), lambda: False, start_paused=True
+        )
+        try:
+            window.on_update(_FRAME_S)
+            window.on_draw()
+            assert window._sim.tick == 0
+            window.on_key_press(arcade_space(), 0)
+            window.on_update(_FRAME_S)
+            assert window._sim.tick == 1
+        finally:
+            window.close()

@@ -36,6 +36,12 @@ from crowd_evac.pathfinding.flow_field import FlowField
 
 _SEED = 42
 _N_AGENTS = 8
+_OVERLAP_AGENTS = 60
+"""Enough bodies for the 10 x 5 m room to jam at the 0.28 m agent radius.
+
+With 24 or 40 agents the closest pair stays beyond one diameter with or
+without the projection, so the comparison would prove nothing.
+"""
 
 
 @pytest.fixture
@@ -575,10 +581,10 @@ class TestNoOverlapInvariant:
         *,
         enable_no_overlap: bool,
     ) -> Simulation:
-        """Build a 24-agent sim (seed 7) with the projection on or off."""
+        """Build a crowded sim (seed 7) with the projection on or off."""
         rng = SeededRNG(7)
         return Simulation(
-            state=spawn(floor, 24, rng.generator),
+            state=spawn(floor, _OVERLAP_AGENTS, rng.generator),
             flow_field=flow,
             panic_field=PanicField(),
             exit_model=ExitModel(floor),
@@ -591,7 +597,8 @@ class TestNoOverlapInvariant:
     ) -> None:
         """The projection holds agents apart where the force alone lets them pack.
 
-        Two seed-matched 24-agent runs step in lock-step toward a shared exit.
+        Two seed-matched runs of ``_OVERLAP_AGENTS`` agents step in lock-step
+        toward a shared exit.
         After a short warm-up that relaxes any deep spawn overlap, the
         projection run keeps its closest pair near one diameter (documented
         0.85x tolerance for finite Jacobi passes at the jam), while the

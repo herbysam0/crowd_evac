@@ -95,10 +95,12 @@ class MonteCarloConfig:
             ``1`` runs in-process.  Results never depend on this.
         direct_seed: Use ``seed`` itself as the spawn seed of the single
             run, matching the game's ``--seed``, instead of deriving it.
+        start_paused: A visual single run waits for SPACE before it starts;
+            SPACE then pauses and resumes it.  Headless runs ignore it.
 
     Raises:
-        ValueError: If a count is below its minimum, or ``direct_seed`` is
-            set with more than one run.
+        ValueError: If a count is below its minimum, or ``direct_seed`` or
+            ``start_paused`` is set with more than one run.
     """
 
     scenario: str = DEFAULT_MC_SCENARIO
@@ -109,6 +111,7 @@ class MonteCarloConfig:
     hazards: tuple[HazardSpec, ...] = ()
     max_workers: int | None = None
     direct_seed: bool = False
+    start_paused: bool = False
 
     def __post_init__(self) -> None:
         """Validate counts and the seed."""
@@ -121,6 +124,10 @@ class MonteCarloConfig:
         if self.direct_seed and self.runs != 1:
             raise ValueError(
                 f"direct_seed needs exactly one run, got {self.runs}"
+            )
+        if self.start_paused and self.runs != 1:
+            raise ValueError(
+                f"start_paused needs exactly one run, got {self.runs}"
             )
         if self.max_workers is not None and self.max_workers < 1:
             raise ValueError(

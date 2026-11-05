@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from pytest_mock import MockerFixture
 
 from crowd_evac.application.hazard_args import HazardOutOfRoomError
 from crowd_evac.application.rng import SeededRNG
@@ -203,6 +204,23 @@ class TestDirectSeed:
         """Verify direct_seed with several runs raises ValueError."""
         with pytest.raises(ValueError, match="direct_seed"):
             _config(runs=2, direct_seed=True)
+
+    def test_start_paused_needs_one_run(self) -> None:
+        """Verify start_paused with several runs raises ValueError."""
+        with pytest.raises(ValueError, match="start_paused"):
+            _config(runs=2, start_paused=True)
+
+    def test_visual_run_receives_start_paused(
+        self, mocker: MockerFixture
+    ) -> None:
+        """Verify the runner hands start_paused to the visual window."""
+        play = mocker.patch(
+            "crowd_evac.montecarlo.visual.run_visual", return_value=[]
+        )
+        run_monte_carlo(
+            _config(runs=1, visual=True, direct_seed=True, start_paused=True)
+        )
+        assert play.call_args.kwargs["start_paused"] is True
 
     def test_random_seed_is_drawn_and_used(self) -> None:
         """Verify a blank seed is drawn, flagged, and used as spawn seed."""

@@ -1,9 +1,11 @@
 """Play a Monte Carlo batch in one arcade window (``--visual``).
 
 Imported on demand by the runner so headless batches never load arcade.
-The window starts each run itself, ignores the mouse and SPACE, and records
-the same exits-per-tick series the headless worker does, so a visual batch
-returns the same outcomes as a headless one.
+The window starts each run itself, ignores the mouse, and records the same
+exits-per-tick series the headless worker does, so a visual batch returns the
+same outcomes as a headless one.  A single run may instead start paused and
+answer SPACE (start, pause, continue) like the game; pausing never changes
+the outcome.
 """
 from __future__ import annotations
 
@@ -46,6 +48,7 @@ class MonteCarloWindow(EvacWindow):
         tasks: Sequence[RunTask],
         notify: Callable[[RunOutcome], None],
         should_cancel: Callable[[], bool],
+        start_paused: bool = False,
     ) -> None:
         """Open the window on the first run and start it.
 
@@ -54,6 +57,9 @@ class MonteCarloWindow(EvacWindow):
             notify: Called with each finished run.
             should_cancel: Polled every tick; ``True`` closes the window and
                 drops the unfinished run.
+            start_paused: Wait for SPACE before the first tick and let SPACE
+                pause and resume.  Only honoured for a single task; a batch
+                always plays on its own.
         """
         first = tasks[0]
         sim, floor_plan = build_simulation_from_scenario(
@@ -72,10 +78,16 @@ class MonteCarloWindow(EvacWindow):
         self.outcomes: list[RunOutcome] = []
         self.finished = False
         self._label: arcade.Text | None = None
-        self._handle_spacebar()  # start without waiting for SPACE
+        # Pausing a batch would stall every later run, so only one run
+        # answers SPACE.
+        self._interactive = start_paused and len(self._tasks) == 1
+        if not self._interactive:
+            self._handle_spacebar()  # start without waiting for SPACE
 
     def on_key_press(self, symbol: int, modifiers: int) -> None:
-        """Ignore keys: pausing or resetting would break the batch."""
+        """Start, pause or continue a single run on SPACE; ignore all else."""
+        if self._interactive and symbol == arcade.key.SPACE:
+            self._handle_spacebar()
 
     def on_update(self, delta_time: float) -> None:
         """Advance the current run one tick, or finish it.
@@ -95,6 +107,8 @@ class MonteCarloWindow(EvacWindow):
             self.finished = True
             self.close()
             return
+        if not self.sim_running:
+            return  # paused: Cancel above still works
         sim = self._sim
         if sim.is_complete or sim.tick >= DEFAULT_MAX_TICKS:
             self._finish_run()
@@ -158,6 +172,7 @@ def run_visual(
     tasks: Sequence[RunTask],
     notify: Callable[[RunOutcome], None],
     should_cancel: Callable[[], bool],
+    start_paused: bool = False,
 ) -> list[RunOutcome]:
     """Play the tasks in a window and return the finished runs.
 
@@ -165,6 +180,7 @@ def run_visual(
         tasks: Runs to play, in order.
         notify: Called with each finished run.
         should_cancel: Polled every tick.
+        start_paused: A single run waits for SPACE, as in the game.
 
     Returns:
         Runs finished when the batch ended; fewer than ``tasks`` if the
@@ -172,6 +188,6 @@ def run_visual(
     """
     if not tasks or should_cancel():
         return []
-    window = MonteCarloWindow(tasks, notify, should_cancel)
+    window = MonteCarloWindow(tasks, notify, should_cancel, start_paused)
     arcade.run()
     return window.outcomes

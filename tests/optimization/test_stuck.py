@@ -20,6 +20,7 @@ from collections.abc import Callable, Sequence
 import numpy as np
 import pytest
 
+from crowd_evac.domain.constants import AGENT_RADIUS
 from crowd_evac.optimization import stuck as S
 from crowd_evac.optimization.harness import RunResult
 from crowd_evac.optimization.stuck import (
@@ -306,8 +307,8 @@ class TestBlockingRange:
     """_blocking_range adds two agent radii to the repulsion radius."""
 
     def test_body_to_body(self) -> None:
-        """0.5 m repulsion → 2*0.55 + 0.5 = 1.6 m centre-distance threshold."""
-        assert S._blocking_range(0.5) == pytest.approx(1.6)
+        """0.5 m repulsion → 2 * AGENT_RADIUS + 0.5 centre-distance threshold."""
+        assert S._blocking_range(0.5) == pytest.approx(2 * AGENT_RADIUS + 0.5)
 
 
 class TestWindowSamples:

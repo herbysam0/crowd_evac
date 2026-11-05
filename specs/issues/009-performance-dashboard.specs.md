@@ -293,6 +293,8 @@ Agent runs named test files only. Full-suite runs belong to the user:
 - [ ] Visual batches play in a separate window while the dashboard stays responsive;
       headless and visual results are equal, including speed.
 - [ ] Cancel keeps finished runs in both modes.
+- [ ] A visual single run opens paused like the game (SPACE starts, pauses, continues;
+      Cancel works while paused); pausing never changes the result. A batch never pauses.
 - [ ] Ctrl+C in the terminal closes the dashboard like the close button: the batch is
       cancelled, no traceback is printed, no child process is left behind.
 - [ ] Single run with seed S spawns as game `--seed S`; CLI Monte Carlo results for a

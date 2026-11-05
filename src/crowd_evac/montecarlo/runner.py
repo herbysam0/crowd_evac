@@ -213,7 +213,9 @@ def _execute(
         # Lazy: only visual batches need arcade.
         from crowd_evac.montecarlo.visual import run_visual
 
-        return run_visual(tasks, notify, should_cancel)
+        return run_visual(
+            tasks, notify, should_cancel, start_paused=config.start_paused
+        )
     workers = min(config.max_workers or os.cpu_count() or 1, total)
     if workers == 1:
         return _run_inline(tasks, notify, should_cancel)
