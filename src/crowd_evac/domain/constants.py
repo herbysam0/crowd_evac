@@ -164,8 +164,13 @@ drift-away response without overwhelming the exit-seeking force.
 
 # -- Grid resolution (FR-4: pathfinding) ------------------------------------
 
-GRID_CELL_SIZE: float = 0.25
-"""Navigation grid cell size in meters."""
+GRID_CELL_SIZE: float = 0.05
+"""Navigation / collision grid cell size in metres.
+
+5 cm so every 0.1 m wall spans at least two cells (issue #17); at 0.25 m a
+thin wall shared a cell row with the room beside it and door openings leaked
+through it. Finer grids (1 cm) need a compiled Dijkstra.
+"""
 
 HAZARD_BLOCK_RADIUS: float = 1.5
 """Radius (m) of the navigation block a hazard punches in the flow field.
@@ -205,15 +210,24 @@ only).
 
 # -- Egress/exit dynamics (FR-5: evacuation flow) ----------------------------
 
+APRON_DEPTH_M: float = 1.0
+"""Depth (m) of the egress apron added behind every door (issue #17).
+
+The apron is a walled corridor, one door-span wide, outside the host wall.
+Agents walk into it after the door gate releases them and are evacuated at
+its outer end, so the whole body physically clears the door.
+"""
+
 EXIT_CAPACITY_PER_SECOND: int = 5
 """Maximum agents passing through an exit per fixed timestep."""
 
 EXIT_CAPTURE_RADIUS: float = 1.0
-"""Distance from exit opening segment (metres) that triggers queue entry.
+"""Flow-field cost (m) to an exit below which an agent counts as queueing.
 
-Measured as perpendicular distance to the nearest point on the exit
-segment (not the centre), so wide exits capture approaching agents
-uniformly along their full lateral span.
+Used only by :mod:`crowd_evac.optimization.stuck` to exclude agents waiting
+at a door from the stuck count. Egress itself no longer uses a capture
+radius: agents join an exit queue only once their whole body has cleared the
+door plane (:mod:`crowd_evac.domain.egress_geometry`, issue #17).
 """
 
 STALL_TICKS: int = 1200

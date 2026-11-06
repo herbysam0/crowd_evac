@@ -1,21 +1,23 @@
 {
-  "schema_version": "2.0",
+  "schema_version": "2.1",
   "name": "bottleneck_corridor",
   "floor_plan": {
-    "width_m": 15.0,
+    "width_m": 16.0,
     "height_m": 10.0,
     "walls": [
       {"x": 0.0, "y": 0.0, "width": 15.0, "height": 0.5, "label": "south_wall"},
       {"x": 0.0, "y": 9.5, "width": 15.0, "height": 0.5, "label": "north_wall"},
       {"x": 0.0, "y": 0.0, "width": 0.5, "height": 10.0, "label": "west_wall"},
-      {"x": 14.5, "y": 0.0, "width": 0.5, "height": 10.0, "label": "east_wall"}
+      {"x": 14.5, "y": 0.0, "width": 0.5, "height": 10.0, "label": "east_wall"},
+      {"x": 15.0, "y": 0.0, "width": 1.0, "height": 3.0, "label": "apron_wall_east_1"},
+      {"x": 15.0, "y": 7.0, "width": 1.0, "height": 3.0, "label": "apron_wall_east_2"}
     ],
     "obstacles": [
       {"x": 9.5, "y": 0.5, "width": 0.5, "height": 3.9, "label": "divider_south"},
       {"x": 9.5, "y": 5.6, "width": 0.5, "height": 3.9, "label": "divider_north"}
     ],
     "exits": [
-      {"x": 14.5, "y": 5.0, "width_m": 4.0, "side": "east", "capacity_per_second": 20, "label": "outflow_exit"}
+      {"x": 14.5, "y": 5.0, "width_m": 4.0, "side": "east", "capacity_per_second": 4.94, "label": "outflow_exit"}
     ]
   }
 }

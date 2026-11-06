@@ -269,7 +269,9 @@ class Simulation:
            a wall or obstacle (skipped when no collision map is set).
         6. Enforce the hard no-overlap invariant: project agent positions so
            no agent overlaps another agent or a wall (skipped when disabled).
-        7. Resolve exits: enqueue arrivals, drain queues to token capacity.
+        7. Resolve exits: hold agents at door lines, queue them, release
+           queue heads at door capacity past the line, evacuate released
+           agents at the end of the egress path.
         8. Increment the monotonic tick counter.
         9. Append a ``"tick_advanced"`` event to the event log, stamped
            at the new tick value.
@@ -327,9 +329,14 @@ class Simulation:
         # 6. Enforce the hard no-overlap invariant: agents never overlap agents
         #    or walls (step 1.19a item 12 / FR-2 R2.1 / FR-3 R3.2).
         if self._enable_no_overlap:
-            resolve_overlaps(self.state, self._collision_map, prev_pos)
+            resolve_overlaps(
+                self.state,
+                self._collision_map,
+                prev_pos,
+                constraints=(self.exit_model.hold_at_doors,),
+            )
 
-        # 7. Resolve exits: enqueue arrivals, drain to capacity
+        # 7. Resolve exits: gate, queue, release at capacity, evacuate
         egressed = self.exit_model.step(self.state)
 
         # 8. Advance tick (now represents "this step has completed")

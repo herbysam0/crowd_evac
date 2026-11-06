@@ -1,0 +1,28 @@
+{
+  "schema_version": "2.1",
+  "name": "room_model_3",
+  "floor_plan": {
+    "width_m": 18.2,
+    "height_m": 10.0,
+    "walls": [
+      {"x": 1.0, "y": 9.0, "width": 16.2, "height": 1.0, "label": "wall_1"},
+      {"x": 16.2, "y": 0.0, "width": 1.0, "height": 10.0, "label": "wall_2"},
+      {"x": 1.0, "y": 0.0, "width": 16.2, "height": 1.0, "label": "wall_3"},
+      {"x": 1.0, "y": 0.0, "width": 1.0, "height": 10.0, "label": "wall_4"},
+      {"x": 2.0, "y": 7.3, "width": 3.7, "height": 0.1, "label": "wall_5"},
+      {"x": 6.6, "y": 7.3, "width": 3.700000000000001, "height": 0.1, "label": "wall_6"},
+      {"x": 12.1, "y": 7.3, "width": 4.1, "height": 0.1, "label": "wall_7"},
+      {"x": 6.55, "y": 1.0, "width": 0.1, "height": 6.4, "label": "wall_8"},
+      {"x": 11.1, "y": 1.0, "width": 0.1, "height": 6.4, "label": "wall_9"},
+      {"x": 0.0, "y": 0.0, "width": 1.0, "height": 7.4, "label": "apron_wall_west_1"},
+      {"x": 0.0, "y": 9.0, "width": 1.0, "height": 1.0, "label": "apron_wall_west_2"},
+      {"x": 17.2, "y": 0.0, "width": 1.0, "height": 7.4, "label": "apron_wall_east_3"},
+      {"x": 17.2, "y": 9.0, "width": 1.0, "height": 1.0, "label": "apron_wall_east_4"}
+    ],
+    "obstacles": [],
+    "exits": [
+      {"x": 2.0, "y": 8.2, "width_m": 1.6, "side": "west", "capacity_per_second": 1.98, "label": "door_10"},
+      {"x": 16.2, "y": 8.2, "width_m": 1.6, "side": "east", "capacity_per_second": 1.98, "label": "door_11"}
+    ]
+  }
+}

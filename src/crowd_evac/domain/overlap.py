@@ -28,6 +28,8 @@ axis). All operations are deterministic so seeded runs stay reproducible
 """
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
+
 import numpy as np
 
 from crowd_evac.domain.agent_state import AgentState, Int1D, Vec2Array
@@ -51,6 +53,7 @@ def resolve_overlaps(
     prev_pos: Vec2Array | None = None,
     *,
     iterations: int = OVERLAP_RESOLUTION_ITERATIONS,
+    constraints: Sequence[Callable[[AgentState], None]] = (),
 ) -> None:
     """Enforce the hard no-overlap invariant by projecting agent positions.
 
@@ -71,6 +74,9 @@ def resolve_overlaps(
             backstop is skipped.
         iterations: Number of separation/wall projection passes. Must be
             non-negative; ``0`` is a no-op apart from the backstop.
+        constraints: Extra position constraints applied after the wall pass
+            in every iteration (e.g. the exit model's door gate), so the
+            separation push cannot drive agents through them.
 
     Raises:
         ValueError: If ``iterations`` is negative.
@@ -83,6 +89,8 @@ def resolve_overlaps(
         _separate_agents(state)
         if collision_map is not None:
             _push_off_walls(state, collision_map)
+        for constrain in constraints:
+            constrain(state)
 
     # Hard backstop: a separation or wall push may have moved a centre into a
     # blocked cell; resolve slides it back so obstacles are never crossed.
@@ -141,7 +149,13 @@ def _wall_pushout(
     point and returns the outward displacement that clears the most deeply
     penetrating blocked (or out-of-bounds) cell. Points already clear, or whose
     centre sits exactly inside a blocked cell (no outward normal; left to the
-    backstop), receive a zero row.
+    backstop), receive a zero row. A flat wall yields a purely normal push
+    from the perpendicular cell; corners are resolved one axis per outer
+    projection pass. Ties keep the first cell in row-major offset order.
+
+    All ``(2 * reach + 1) ** 2`` candidate cells are evaluated in one
+    vectorised batch: at a 5 cm grid the neighbourhood is 13 x 13 cells, and a
+    per-offset loop dominated the tick.
 
     Args:
         collision_map: Source of the static blocking grid and cell size.
@@ -153,59 +167,30 @@ def _wall_pushout(
     """
     pts = np.asarray(points, dtype=np.float64)
     push: Vec2Array = np.zeros_like(pts)
-    if pts.shape[0] == 0:
+    n = pts.shape[0]
+    if n == 0:
         return push
 
     cell = collision_map.cell_size
     reach = int(np.ceil(clearance / cell))
-    col0 = np.floor(pts[:, 0] / cell).astype(np.intp)
-    row0 = np.floor(pts[:, 1] / cell).astype(np.intp)
-    best_pen = np.zeros(pts.shape[0], dtype=np.float64)
+    offsets = np.arange(-reach, reach + 1, dtype=np.intp)
+    d_row, d_col = (a.ravel() for a in np.meshgrid(offsets, offsets, indexing="ij"))
+    rows: Int1D = np.floor(pts[:, 1] / cell).astype(np.intp)[:, None] + d_row
+    cols: Int1D = np.floor(pts[:, 0] / cell).astype(np.intp)[:, None] + d_col
 
-    for d_row in range(-reach, reach + 1):
-        for d_col in range(-reach, reach + 1):
-            _accumulate_pushout(
-                collision_map,
-                pts,
-                row0 + d_row,
-                col0 + d_col,
-                clearance,
-                best_pen,
-                push,
-            )
-    return push
-
-
-def _accumulate_pushout(
-    collision_map: CollisionMap,
-    pts: Vec2Array,
-    rows: Int1D,
-    cols: Int1D,
-    clearance: float,
-    best_pen: Vec2Array,
-    push: Vec2Array,
-) -> None:
-    """Fold one candidate cell per point into the running deepest-contact push.
-
-    Updates ``best_pen`` and ``push`` in place wherever the candidate cell is
-    blocked and penetrates the point more deeply than any cell seen so far. A
-    flat wall yields a purely normal push from the perpendicular cell; corners
-    are resolved one axis per outer projection pass.
-    """
-    cell = collision_map.cell_size
-    cell_x0 = cols * cell
-    cell_y0 = rows * cell
-    near_x = np.clip(pts[:, 0], cell_x0, cell_x0 + cell)
-    near_y = np.clip(pts[:, 1], cell_y0, cell_y0 + cell)
-    vec_x = pts[:, 0] - near_x
-    vec_y = pts[:, 1] - near_y
+    px = pts[:, 0:1]
+    py = pts[:, 1:2]
+    vec_x = px - np.clip(px, cols * cell, (cols + 1) * cell)
+    vec_y = py - np.clip(py, rows * cell, (rows + 1) * cell)
     dist = np.hypot(vec_x, vec_y)
     pen = clearance - dist
-    blocked = collision_map.cells_blocked(rows, cols)
-    hit = blocked & (pen > best_pen) & (dist > 0.0)
-    if not np.any(hit):
-        return
-    scale = pen[hit] / dist[hit]
-    push[hit, 0] = vec_x[hit] * scale
-    push[hit, 1] = vec_y[hit] * scale
-    best_pen[hit] = pen[hit]
+    blocked = collision_map.cells_blocked(rows.ravel(), cols.ravel())
+    hit = blocked.reshape(rows.shape) & (pen > 0.0) & (dist > 0.0)
+
+    best = np.argmax(np.where(hit, pen, -np.inf), axis=1)
+    agents = np.flatnonzero(hit.any(axis=1))
+    k = best[agents]
+    scale = pen[agents, k] / dist[agents, k]
+    push[agents, 0] = vec_x[agents, k] * scale
+    push[agents, 1] = vec_y[agents, k] * scale
+    return push

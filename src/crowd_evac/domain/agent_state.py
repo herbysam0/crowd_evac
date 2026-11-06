@@ -21,7 +21,7 @@ from typing import TypeAlias, cast
 import numpy as np
 import numpy.typing as npt
 
-from crowd_evac.domain.constants import AGENT_RADIUS
+from crowd_evac.domain.constants import AGENT_RADIUS, GRID_CELL_SIZE
 from crowd_evac.domain.floor_plan import FloorPlan
 
 logger = logging.getLogger(__name__)
@@ -347,7 +347,7 @@ def spawn(
     floor_plan: FloorPlan,
     count: int,
     rng: np.random.Generator,
-    cell_size: float = 0.25,
+    cell_size: float = GRID_CELL_SIZE,
 ) -> AgentState:
     """Spawn agents without overlapping walls, obstacles, or each other.
 

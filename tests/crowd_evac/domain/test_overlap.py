@@ -15,6 +15,7 @@ import numpy as np
 import numpy.typing as npt
 import pytest
 
+from crowd_evac.domain.agent_state import AgentState
 from crowd_evac.domain.collision import CollisionMap
 from crowd_evac.domain.constants import AGENT_RADIUS
 from crowd_evac.domain.overlap import (
@@ -228,3 +229,31 @@ class TestEdgeCases:
         state = make_state([[0.0, 0.0]])
         with pytest.raises(ValueError, match="iterations must be non-negative"):
             resolve_overlaps(state, iterations=-1)
+
+
+class TestConstraints:
+    """Extra constraints (the door gate) run inside every projection pass."""
+
+    def test_constraint_called_once_per_iteration(
+        self, make_state: MakeState
+    ) -> None:
+        """Each of the ``iterations`` passes applies every constraint."""
+        state = make_state([(1.0, 1.0), (1.1, 1.0)])
+        calls: list[int] = []
+        resolve_overlaps(
+            state, iterations=3, constraints=(lambda s: calls.append(s.count),)
+        )
+        assert calls == [2, 2, 2]
+
+    def test_constraint_applied_after_separation(
+        self, make_state: MakeState
+    ) -> None:
+        """A constraint pinning x <= 1.0 holds against the separation push."""
+        state = make_state([(1.0, 1.0), (0.9, 1.0)])
+
+        def pin(s: AgentState) -> None:
+            """Clamp every agent's x to at most 1.0."""
+            s.pos[:, 0] = np.minimum(s.pos[:, 0], 1.0)
+
+        resolve_overlaps(state, iterations=1, constraints=(pin,))
+        assert state.pos[:, 0].max() <= 1.0

@@ -1,8 +1,9 @@
-"""Convert a design :class:`Layout` to schema-2.0 ``ScenarioData``.
+"""Convert a design :class:`Layout` to schema-2.1 ``ScenarioData``.
 
 Follows the conventions of the bundled scenarios: ``north`` is the bottom
 wall (``y=0``), ``south`` the top wall (``y=height_m``), and an exit's
-centre sits on the inner face of its wall.
+centre sits on the inner face of its wall. A 1 m egress apron is added
+behind every door (:func:`~crowd_evac.scenarios.apron.add_aprons`).
 """
 from __future__ import annotations
 
@@ -23,6 +24,7 @@ from crowd_evac.domain.floor_plan import (
     Wall,
 )
 from crowd_evac.pathfinding.flow_field import FlowField
+from crowd_evac.scenarios.apron import add_aprons
 from crowd_evac.scenarios.schema import (
     ExitData,
     FloorPlanData,
@@ -31,7 +33,8 @@ from crowd_evac.scenarios.schema import (
     WallData,
 )
 
-SCHEMA_VERSION = "2.0"
+SCHEMA_VERSION = "2.1"
+_PRE_APRON_VERSION = "2.0"
 
 
 def export_scenario(layout: Layout) -> ScenarioData:
@@ -47,11 +50,12 @@ def export_scenario(layout: Layout) -> ScenarioData:
         DesignValidationError: If the layout itself is invalid.
     """
     validate(layout)
-    return ScenarioData(
-        schema_version=SCHEMA_VERSION,
+    base = ScenarioData(
+        schema_version=_PRE_APRON_VERSION,
         name=layout.room.name,
         floor_plan=_floor_plan(layout),
     )
+    return add_aprons(base)
 
 
 def _floor_plan(layout: Layout) -> FloorPlanData:

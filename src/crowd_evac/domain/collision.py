@@ -19,11 +19,11 @@ Resolution is **axis-separated sliding**, the standard grid-collision rule:
 try the full move; if blocked, try moving on the x-axis only, then the y-axis
 only; if all are blocked, the agent stays put. The velocity component into a
 blocked axis is zeroed so the agent does not accumulate momentum against a
-wall. Because the maximum per-tick displacement
-(``MAX_SPEED * PANIC_SPEED_MULTIPLIER * DT``) is smaller than one grid cell and
-every obstacle rasterises to at least one cell thick, an agent can enter at
-most an adjacent cell each tick — so checking the destination cell alone is
-sufficient and no obstacle can be tunnelled through.
+wall. The maximum per-tick displacement
+(``MAX_SPEED * PANIC_SPEED_MULTIPLIER * DT`` ≈ 0.24 m) spans several fine grid
+cells, so each candidate move is tested at every point spaced at most half a
+cell along its path, not just at the destination: no wall at least one cell
+thick can be tunnelled through.
 
 Coordinate convention matches :class:`FloorPlan`: cell ``[r, c]`` covers
 ``[c*cell_size, (c+1)*cell_size) x [r*cell_size, (r+1)*cell_size)`` with origin
@@ -38,6 +38,9 @@ import numpy.typing as npt
 from crowd_evac.domain.agent_state import AgentState, Bool1D, Int1D, Vec2Array
 from crowd_evac.domain.constants import GRID_CELL_SIZE
 from crowd_evac.domain.floor_plan import FloorPlan
+
+_PATH_SAMPLES_PER_CELL: int = 2
+"""Path samples per cell length; half-cell spacing cannot skip a cell."""
 
 
 class CollisionMap:
@@ -219,9 +222,9 @@ class CollisionMap:
         """
         x0, y0 = p0[:, 0], p0[:, 1]
         x1, y1 = p1[:, 0], p1[:, 1]
-        full_ok: Bool1D = ~self.is_blocked(p1)
-        x_ok: Bool1D = ~self.is_blocked(np.column_stack((x1, y0)))
-        y_ok: Bool1D = ~self.is_blocked(np.column_stack((x0, y1)))
+        full_ok: Bool1D = self._path_clear(p0, p1)
+        x_ok: Bool1D = self._path_clear(p0, np.column_stack((x1, y0)))
+        y_ok: Bool1D = self._path_clear(p0, np.column_stack((x0, y1)))
 
         # Full move wins; else slide on x; else slide on y; else stay put.
         moved_x: Bool1D = full_ok | x_ok
@@ -231,3 +234,27 @@ class CollisionMap:
         new_pos[:, 0] = np.where(moved_x, x1, x0)
         new_pos[:, 1] = np.where(moved_y, y1, y0)
         return new_pos, moved_x, moved_y
+
+    def _path_clear(self, p0: Vec2Array, p1: Vec2Array) -> Bool1D:
+        """Return whether every sampled point on ``p0 -> p1`` is unblocked.
+
+        Samples are spaced at most ``cell_size / 2`` apart (destination
+        included, origin excluded — it is walkable by invariant), so a move
+        longer than a cell cannot hop over a thin wall.
+
+        Args:
+            p0: Start positions, shape ``(A, 2)``.
+            p1: End positions, shape ``(A, 2)``.
+
+        Returns:
+            Boolean array of shape ``(A,)``; ``True`` where the path is clear.
+        """
+        clear: Bool1D = ~self.is_blocked(p1)
+        if p0.shape[0] == 0:
+            return clear
+        longest = float(np.max(np.linalg.norm(p1 - p0, axis=1)))
+        steps = int(np.ceil(longest * _PATH_SAMPLES_PER_CELL / self.cell_size))
+        for k in range(1, steps):
+            point = p0 + (p1 - p0) * (k / steps)
+            clear &= ~self.is_blocked(point)
+        return clear

@@ -36,11 +36,12 @@ from crowd_evac.pathfinding.flow_field import FlowField
 
 _SEED = 42
 _N_AGENTS = 8
-_OVERLAP_AGENTS = 60
+_OVERLAP_AGENTS = 100
 """Enough bodies for the 10 x 5 m room to jam at the 0.28 m agent radius.
 
-With 24 or 40 agents the closest pair stays beyond one diameter with or
-without the projection, so the comparison would prove nothing.
+The 5 cm spawn grid separates bodies cleanly, so with 60 or fewer agents the
+closest pair stays beyond one diameter with or without the projection and
+the comparison would prove nothing.
 """
 
 

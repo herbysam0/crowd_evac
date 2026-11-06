@@ -7,14 +7,19 @@ bounded re-routing via recompute. Exercises the FR-4 acceptance behaviours:
   - two exits route each cell to the lower-cost exit;
   - an equidistant cell still resolves to a valid draining direction;
   - blocking an exit re-routes affected cells to the other exit;
-  - recompute leaves cells far from the block unchanged (bounded).
+  - recompute leaves cells far from the block unchanged (bounded);
+  - room_model_3 routes through the interior gap, not the corner (#17);
+  - lecture_hall builds within budget at the 5 cm grid (perf).
 """
 from __future__ import annotations
+
+from time import perf_counter
 
 import numpy as np
 import numpy.typing as npt
 import pytest
 
+from crowd_evac.adapters.io.scenario_loader import load_bundled_scenario
 from crowd_evac.domain.errors import PathfindingError
 from crowd_evac.domain.floor_plan import Exit, ExitSide, FloorPlan, Wall
 from crowd_evac.pathfinding.flow_field import (
@@ -518,3 +523,45 @@ class TestDangerField:
         # A cell in the danger core still routes somewhere (non-zero dir).
         core = hazardous.sample(np.array([[8.0, 3.0]]))
         assert np.linalg.norm(core[0]) > 0.0
+
+
+class TestRoomModel3Routing:
+    """Issue #17: lower-left room routes through its interior gap."""
+
+    def test_descent_from_lower_room_uses_interior_gap(
+        self, room_model_3: FloorPlan
+    ) -> None:
+        """Following the field from (3.0, 5.0) crosses y = 7.35 at x 4.7-5.55.
+
+        The lower-left room's only opening is the gap between ``wall_5`` and
+        ``wall_8``; the top-left corner (1.0, 7.3) under the west door must
+        never be a route.
+        """
+        field = FlowField.build(room_model_3)
+        cs = field.cell_size
+        r, c = int(5.0 / cs), int(3.0 / cs)
+        crossings: list[float] = []
+        for _ in range(field.cost.size):
+            if field.cost[r, c] == 0.0:
+                break
+            dx, dy = field.direction[r, c]
+            nr, nc = r + int(round(dy)), c + int(round(dx))
+            if (r + 0.5) * cs < 7.35 <= (nr + 0.5) * cs:
+                crossings.append((nc + 0.5) * cs)
+            r, c = nr, nc
+        assert field.cost[r, c] == 0.0
+        assert crossings and all(4.7 <= x <= 5.55 for x in crossings)
+
+
+@pytest.mark.perf
+class TestFineGridBuildPerf:
+    """Flow-field solve stays affordable at the 5 cm grid."""
+
+    MAX_BUILD_S: float = 15.0
+
+    def test_lecture_hall_build_under_budget(self) -> None:
+        """lecture_hall (50 x 30 m → 600 k cells) builds in < 15 s."""
+        plan, _ = load_bundled_scenario("lecture_hall")
+        start = perf_counter()
+        FlowField.build(plan)
+        assert perf_counter() - start < self.MAX_BUILD_S

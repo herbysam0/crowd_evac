@@ -4,7 +4,7 @@ These types are the contract between the on-disk JSON format and the
 scenario loader. All fields map 1:1 to JSON keys. Optional fields use
 ``NotRequired``; required fields are present in all valid scenario files.
 
-Schema version: "2.0"
+Schema version: "2.1" ("2.0" still loads, without door aprons)
 """
 from __future__ import annotations
 
@@ -98,7 +98,7 @@ class ScenarioData(TypedDict):
     Example structure::
 
         {
-          "schema_version": "2.0",
+          "schema_version": "2.1",
           "name": "lecture_hall",
           "floor_plan": { ... }
         }

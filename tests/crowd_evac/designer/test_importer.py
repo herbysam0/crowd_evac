@@ -8,6 +8,7 @@ Covers:
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -21,8 +22,10 @@ from crowd_evac.adapters.io.scenario_writer import write_scenario
 from crowd_evac.designer.export import build_validated_scenario
 from crowd_evac.designer.importer import layout_from_scenario
 from crowd_evac.designer.model import DesignModel
+from crowd_evac.domain.constants import APRON_DEPTH_M
 from crowd_evac.domain.errors import DesignValidationError
 from crowd_evac.domain.floor_plan import Exit, ExitSide, FloorPlan
+from crowd_evac.scenarios.apron import add_aprons
 from crowd_evac.scenarios.schema import ScenarioData
 
 BUNDLED = list_bundled_scenarios()
@@ -40,7 +43,13 @@ def _exit_key(plan: FloorPlan) -> list[tuple[float, float, int]]:
 @pytest.mark.parametrize("name", BUNDLED)
 def test_bundled_scenario_round_trips(name: str, tmp_path: Path) -> None:
     """Import -> export -> reload keeps geometry and writes a room-only file."""
-    plan, data = load_scenario_file(SCENARIOS_DIR / f"{name}.json")
+    raw = json.loads(
+        (SCENARIOS_DIR / f"{name}.json").read_text(encoding="utf-8")
+    )
+    migrated = tmp_path / "expected"
+    migrated.mkdir()
+    expected = write_scenario(add_aprons(raw), migrated)
+    plan, data = load_scenario_file(expected)
     layout = layout_from_scenario(plan, data)
     saved = write_scenario(build_validated_scenario(layout), tmp_path)
     plan2, data2 = load_scenario_file(saved)
@@ -69,10 +78,12 @@ def test_mislabelled_exit_side_is_matched_by_position(tmp_path: Path) -> None:
     plan, data = load_scenario_file(SCENARIOS_DIR / "open_room_search.json")
     layout = layout_from_scenario(plan, data)
     out = build_validated_scenario(layout)
+    # Top wall's inner face sits below the 1 m apron added above it.
+    top_face = out["floor_plan"]["height_m"] - APRON_DEPTH_M - 1.0
     sides_at_top = [
         e["side"]
         for e in out["floor_plan"]["exits"]
-        if e["y"] >= plan.height_m - 1.0
+        if e["y"] >= top_face
     ]
     assert sides_at_top == ["south"]  # south == top wall in this codebase
 
