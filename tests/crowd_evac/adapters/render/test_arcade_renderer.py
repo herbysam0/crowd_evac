@@ -251,6 +251,36 @@ class TestArcadeRendererHeadless:
         renderer = ArcadeRenderer(floor_plan, headless=True)
         renderer.render(make_snapshot(n_agents=5))
 
+    def test_render_draws_grid_between_floor_and_geometry(
+        self,
+        floor_plan: FloorPlan,
+        make_snapshot: MakeSnapshot,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Grid is drawn once, after the floor and before geometry."""
+        import crowd_evac.adapters.render.arcade_renderer as mod
+
+        renderer = ArcadeRenderer(floor_plan, headless=True)
+        renderer._headless = False
+        calls: list[str] = []
+        for name in (
+            "_draw_background",
+            "_draw_floor",
+            "_draw_geometry",
+            "_draw_panic_sources",
+            "_sync_and_draw_agents",
+        ):
+            monkeypatch.setattr(
+                renderer, name, lambda *a, _n=name, **k: calls.append(_n)
+            )
+        monkeypatch.setattr(
+            mod, "draw_grid", lambda *a, **k: calls.append("grid")
+        )
+        renderer.render(make_snapshot(n_agents=2))
+        assert calls.count("grid") == 1
+        assert calls.index("_draw_floor") < calls.index("grid")
+        assert calls.index("grid") < calls.index("_draw_geometry")
+
     # -- Snapshot immutability (R7.3) --------------------------------------
 
     def test_render_does_not_mutate_positions(

@@ -88,3 +88,19 @@ class TestFitWindowSize:
         """Tiny displays still get a usable window."""
         width, height = fit_window_size((800, 600), 1.0)
         assert width >= 900 and height >= 500
+
+
+def test_draw_room_uses_shared_grid(monkeypatch: pytest.MonkeyPatch) -> None:
+    """draw_room delegates the grid to draw_grid with viewport values."""
+    from unittest.mock import MagicMock
+
+    from crowd_evac.adapters.render import designer_view as dv
+    from crowd_evac.adapters.render.viewport import Viewport
+
+    grid = MagicMock()
+    monkeypatch.setattr(dv, "draw_grid", grid)
+    monkeypatch.setattr(dv.arcade, "draw_lrbt_rectangle_filled", MagicMock())
+    model = ready_controller().model
+    dv.draw_room(Viewport(ppm=20.0, ox=5.0, oy=7.0), model)
+    room = model.layout.room
+    grid.assert_called_once_with(room.width_m, room.height_m, 20.0, 5.0, 7.0)

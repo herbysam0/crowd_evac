@@ -48,6 +48,7 @@ from crowd_evac.adapters.io.hazard_catalog import (
     HazardType,
     load_hazard_types,
 )
+from crowd_evac.adapters.render.grid_overlay import draw_grid
 from crowd_evac.domain.constants import AGENT_RADIUS, PIXELS_PER_METER
 from crowd_evac.domain.floor_plan import ExitSide, FloorPlan
 from crowd_evac.domain.panic_source import PanicSource
@@ -399,8 +400,8 @@ class ArcadeRenderer:
 
         1. Optional background image (R7.1).
         2. Room floor.
-        3. Walls and interior obstacles.
-        4. Exit openings.
+        3. 1 m grid (faint, under everything below).
+        4. Walls and interior obstacles; exit openings.
         5. Active panic sources.
         6. Agents (alive = panic-coded colour; dead = hidden).
 
@@ -419,6 +420,13 @@ class ArcadeRenderer:
 
         self._draw_background()
         self._draw_floor()
+        draw_grid(
+            self.floor_plan.width_m,
+            self.floor_plan.height_m,
+            self._ppm,
+            self._x_offset_px,
+            self._y_offset_px,
+        )
         self._draw_geometry()
         self._draw_panic_sources(snapshot.panic_sources)
         self._sync_and_draw_agents(snapshot)
