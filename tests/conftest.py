@@ -8,6 +8,7 @@ import numpy.typing as npt
 import pytest
 
 from crowd_evac.domain.agent_state import AgentState
+from crowd_evac.domain.floor_plan import Exit, ExitSide, FloorPlan, Wall
 
 # A builder taking (pos, vel=None, panic=None, alive=None) -> AgentState.
 MakeState = Callable[..., AgentState]
@@ -65,3 +66,30 @@ def make_state() -> MakeState:
         )
 
     return _make
+
+
+@pytest.fixture
+def room_model_3() -> FloorPlan:
+    """Pre-apron ``room_model_3`` geometry (issue #17 regression fixture).
+
+    16.2 x 10 m: 1 m perimeter walls, a hall along the top (y 7.4-9.0)
+    separated from three lower rooms by 0.1 m walls at y 7.3-7.4, and
+    1.6 m doors through the west and east perimeter walls spanning
+    y 7.4-9.0. ``wall_5`` touches the west door's lower edge.
+    """
+    walls = (
+        Wall(0.0, 9.0, 16.2, 1.0, "wall_1"),
+        Wall(15.2, 0.0, 1.0, 10.0, "wall_2"),
+        Wall(0.0, 0.0, 16.2, 1.0, "wall_3"),
+        Wall(0.0, 0.0, 1.0, 10.0, "wall_4"),
+        Wall(1.0, 7.3, 3.7, 0.1, "wall_5"),
+        Wall(5.6, 7.3, 3.7, 0.1, "wall_6"),
+        Wall(11.1, 7.3, 4.1, 0.1, "wall_7"),
+        Wall(5.55, 1.0, 0.1, 6.4, "wall_8"),
+        Wall(10.1, 1.0, 0.1, 6.4, "wall_9"),
+    )
+    exits = (
+        Exit(1.0, 8.2, 1.6, ExitSide.WEST, 1.0, "door_10"),
+        Exit(15.2, 8.2, 1.6, ExitSide.EAST, 1.0, "door_11"),
+    )
+    return FloorPlan(16.2, 10.0, walls, (), exits)

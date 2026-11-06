@@ -24,7 +24,7 @@ from crowd_evac.designer.placement import (
 )
 from crowd_evac.domain.errors import DesignValidationError
 
-DEFAULT_DOOR_WIDTH_M: float = 1.5
+DEFAULT_DOOR_WIDTH_M: float = 0.85
 
 
 class Tool(Enum):

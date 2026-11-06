@@ -56,12 +56,12 @@ class TestNumericEdit:
     def test_doorway_width_and_capacity_edit(
         self, ctl: DesignController
     ) -> None:
-        """Verify doorway width and (integer) capacity edits."""
+        """Verify doorway width and (fractional) capacity edits."""
         bottom_wall_with_door(ctl)
         assert ctl.apply_edit("width_m", 3.0)
-        assert ctl.apply_edit("capacity_per_second", 7.0)
+        assert ctl.apply_edit("capacity_per_second", 7.5)
         door = next(iter(ctl.model.layout.doorways.values()))
-        assert (door.width_m, door.capacity_per_second) == (3.0, 7)
+        assert (door.width_m, door.capacity_per_second) == (3.0, 7.5)
 
     def test_update_room_reports_rejection(self, ctl: DesignController) -> None:
         """Verify room changes pass through with status on failure."""

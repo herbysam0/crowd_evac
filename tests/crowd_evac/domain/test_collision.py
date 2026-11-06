@@ -331,3 +331,32 @@ class TestResolveEdgeCases:
         state = make_state([[0.5, 0.5]])
         with pytest.raises(ValueError, match="prev_pos must have shape"):
             cmap.resolve(state, np.zeros((3, 2), dtype=np.float64))
+
+
+class TestResolveNoTunnelling:
+    """Moves longer than a cell cannot hop over a thin wall (5 cm grid)."""
+
+    def test_long_move_across_two_cell_wall_is_rejected(
+        self, make_state: MakeState
+    ) -> None:
+        """A 0.24 m step across a 0.1 m wall (2 cells) is stopped.
+
+        Only the destination cell is free, so a destination-only check
+        would let the agent tunnel; the swept path test must reject it.
+        """
+        blocked = np.zeros((10, 20), dtype=np.bool_)
+        blocked[:, 10:12] = True  # wall x ∈ [0.50, 0.60)
+        cmap = CollisionMap(blocked, cell_size=0.05)
+        prev = np.array([[0.42, 0.25]])
+        state = make_state([[0.66, 0.25]], vel=[[4.8, 0.0]])
+        cmap.resolve(state, prev)
+        np.testing.assert_allclose(state.pos[0], [0.42, 0.25])
+        assert state.vel[0, 0] == 0.0
+
+    def test_long_clear_move_is_accepted(self, make_state: MakeState) -> None:
+        """A multi-cell move through open space is unchanged."""
+        cmap = CollisionMap(np.zeros((10, 20), dtype=np.bool_), cell_size=0.05)
+        prev = np.array([[0.10, 0.25]])
+        state = make_state([[0.34, 0.25]])
+        cmap.resolve(state, prev)
+        np.testing.assert_allclose(state.pos[0], [0.34, 0.25])

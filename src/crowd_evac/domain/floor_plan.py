@@ -8,23 +8,14 @@ No framework or I/O imports — pure Python + NumPy.
 """
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
-from enum import Enum
 
 import numpy as np
 import numpy.typing as npt
 
+from crowd_evac.domain import floor_grid
+from crowd_evac.domain.door_geometry import ExitSide as ExitSide
 from crowd_evac.domain.errors import ScenarioValidationError
-
-
-class ExitSide(str, Enum):
-    """Cardinal wall on which an exit opening is positioned."""
-
-    NORTH = "north"
-    SOUTH = "south"
-    EAST = "east"
-    WEST = "west"
 
 
 @dataclass(frozen=True)
@@ -86,7 +77,7 @@ class Exit:
     y: float
     width_m: float
     side: ExitSide
-    capacity_per_second: int
+    capacity_per_second: float
     label: str = ""
 
 
@@ -127,8 +118,11 @@ class FloorPlan:
         the room's bottom-left corner. Cell ``[r, c]`` covers
         ``[c*cell_size, (c+1)*cell_size) × [r*cell_size, (r+1)*cell_size)``.
 
-        Exit openings override walls: cells within an exit bounding box are
-        always walkable regardless of wall placement.
+        Walls and obstacles block every cell they touch. Each exit carves its
+        opening through its *host* wall only (full wall thickness, door span
+        rounded inward); all other walls and obstacles stay blocked, so a
+        door never re-opens an interior wall. See
+        :mod:`crowd_evac.domain.floor_grid`.
 
         Args:
             cell_size: Side length of each grid cell in metres. Must be > 0.
@@ -139,100 +133,35 @@ class FloorPlan:
 
         Raises:
             ValueError: If cell_size is not positive.
+            ScenarioValidationError: If an exit span covers no whole cell.
         """
-        if cell_size <= 0:
-            raise ValueError(
-                f"cell_size must be positive, got {cell_size!r}"
-            )
-        rows = math.ceil(self.height_m / cell_size)
-        cols = math.ceil(self.width_m / cell_size)
-        mask: npt.NDArray[np.bool_] = np.ones((rows, cols), dtype=np.bool_)
-
-        for rect in (*self.walls, *self.obstacles):
-            r0, r1, c0, c1 = _rect_cell_range(
-                rect.x, rect.y, rect.width, rect.height, cell_size, rows, cols
-            )
-            mask[r0:r1, c0:c1] = False
-
-        for exit_ in self.exits:
-            bx, by, bw, bh = _exit_bbox(exit_, cell_size)
-            r0, r1, c0, c1 = _rect_cell_range(
-                bx, by, bw, bh, cell_size, rows, cols
-            )
-            mask[r0:r1, c0:c1] = True
-
-        return mask
+        return floor_grid.walkable_mask(self, cell_size)
 
     def exit_cells(self, cell_size: float) -> list[tuple[int, int]]:
-        """Return grid cell indices for all exit openings.
+        """Return flow-field goal cells for all exit openings.
 
-        These are the goal cells for flow-field pathfinding (step 1.5).
-        Each returned cell lies within an exit opening bounding box and is
-        guaranteed walkable in the grid from :meth:`walkable_mask`.
+        Goals are the outermost walkable cells reached by marching outward
+        from each door plane through its opening (apron outer edge, or the
+        outer face of the carved host-wall gap), so agents are routed
+        *through* the door. Every cell is walkable in :meth:`walkable_mask`.
 
         Args:
             cell_size: Side length of each grid cell in metres. Must be > 0.
 
         Returns:
-            List of ``(row, col)`` integer tuples; one entry per exit cell.
+            List of ``(row, col)`` integer tuples; one entry per goal cell.
             May contain duplicates if exits overlap.
 
         Raises:
             ValueError: If cell_size is not positive.
+            ScenarioValidationError: If an exit span covers no whole cell.
         """
-        if cell_size <= 0:
-            raise ValueError(
-                f"cell_size must be positive, got {cell_size!r}"
-            )
-        rows = math.ceil(self.height_m / cell_size)
-        cols = math.ceil(self.width_m / cell_size)
-        cells: list[tuple[int, int]] = []
-        for exit_ in self.exits:
-            bx, by, bw, bh = _exit_bbox(exit_, cell_size)
-            r0, r1, c0, c1 = _rect_cell_range(
-                bx, by, bw, bh, cell_size, rows, cols
-            )
-            for r in range(r0, r1):
-                for c in range(c0, c1):
-                    cells.append((r, c))
-        return cells
+        return floor_grid.exit_cells(self, cell_size)
 
 
 # ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
-
-
-def _rect_cell_range(
-    x: float,
-    y: float,
-    width: float,
-    height: float,
-    cell_size: float,
-    rows: int,
-    cols: int,
-) -> tuple[int, int, int, int]:
-    """Return (r0, r1, c0, c1) cell-index range for a rectangle, clamped."""
-    c0 = max(0, math.floor(x / cell_size))
-    c1 = min(cols, math.ceil((x + width) / cell_size))
-    r0 = max(0, math.floor(y / cell_size))
-    r1 = min(rows, math.ceil((y + height) / cell_size))
-    return r0, r1, c0, c1
-
-
-def _exit_bbox(exit_: Exit, cell_size: float) -> tuple[float, float, float, float]:
-    """Return (x_min, y_min, width, height) bounding box of an exit opening.
-
-    The opening spans ``exit_.width_m`` along the wall's axis; the depth
-    perpendicular to the wall equals ``cell_size`` (one cell), centred on
-    the exit position.
-    """
-    half = exit_.width_m / 2.0
-    depth = cell_size
-    if exit_.side in (ExitSide.SOUTH, ExitSide.NORTH):
-        return (exit_.x - half, exit_.y - depth / 2.0, exit_.width_m, depth)
-    # EAST or WEST: opening is along the y-axis
-    return (exit_.x - depth / 2.0, exit_.y - half, depth, exit_.width_m)
 
 
 def _validate(fp: FloorPlan) -> None:
@@ -266,7 +195,7 @@ def _validate(fp: FloorPlan) -> None:
         if exit_.capacity_per_second <= 0:
             raise ScenarioValidationError(
                 f"Exit '{exit_.label}' capacity_per_second must be a positive "
-                f"integer, got {exit_.capacity_per_second!r}"
+                f"number, got {exit_.capacity_per_second!r}"
             )
 
 

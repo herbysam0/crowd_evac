@@ -13,6 +13,7 @@ hazards are run-time input.
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -33,7 +34,12 @@ from crowd_evac.scenarios.schema import (
     WallData,
 )
 
-SUPPORTED_VERSION = "2.0"
+SUPPORTED_VERSION = "2.1"
+_PRE_APRON_VERSION = "2.0"
+SUPPORTED_VERSIONS = (_PRE_APRON_VERSION, SUPPORTED_VERSION)
+APRON_MIGRATION_SCRIPT = "scripts/migrate_door_apron.py"
+
+logger = logging.getLogger(__name__)
 _LEGACY_VERSION = "1.0"
 MIGRATION_SCRIPT = "scripts/migrate_scenarios.py"
 
@@ -152,12 +158,17 @@ def _coerce_scenario(raw: Any, source: str) -> ScenarioData:
         raise MalformedScenarioError(
             f"Scenario {source!r}: schema_version {_LEGACY_VERSION!r} is no "
             f"longer supported; run {MIGRATION_SCRIPT} to convert it to "
-            f"{SUPPORTED_VERSION!r}"
+            f"{_PRE_APRON_VERSION!r}, then {APRON_MIGRATION_SCRIPT}"
         )
-    if version != SUPPORTED_VERSION:
+    if version not in SUPPORTED_VERSIONS:
         raise MalformedScenarioError(
             f"Scenario {source!r}: unsupported schema_version {version!r}; "
             f"expected {SUPPORTED_VERSION!r}"
+        )
+    if version == _PRE_APRON_VERSION:
+        logger.warning(
+            "Scenario %r is pre-apron (schema %s); run %s to add door aprons",
+            source, _PRE_APRON_VERSION, APRON_MIGRATION_SCRIPT,
         )
 
     return ScenarioData(
@@ -255,6 +266,6 @@ def _build_exit(data: ExitData, source: str) -> Exit:
         y=float(data["y"]),
         width_m=float(data["width_m"]),
         side=side,
-        capacity_per_second=int(data["capacity_per_second"]),
+        capacity_per_second=float(data["capacity_per_second"]),
         label=str(data.get("label", "")),
     )

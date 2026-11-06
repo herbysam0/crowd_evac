@@ -59,7 +59,7 @@ class TestExportFields:
     def test_header_fields(self, model: DesignModel) -> None:
         """Verify export is version, name and floor plan only."""
         data = export_scenario(model.layout)
-        assert data["schema_version"] == "2.0"
+        assert data["schema_version"] == "2.1"
         assert data["name"] == "unit_room"
         assert set(data) == {"schema_version", "name", "floor_plan"}
 
@@ -98,18 +98,38 @@ class TestThicknessExport:
         wall = model.add_wall(0, 0, ROOM_W, 0, thickness=0.8)
         model.add_doorway(wall.id, 5.0, 2.0)
         exit_ = export_scenario(model.layout)["floor_plan"]["exits"][0]
-        assert exit_["y"] == 0.8
+        # +1.0: the y = 0 side gained an apron, shifting all geometry
+        assert exit_["y"] == 1.8
+
+
+class TestApronExport:
+    """Export adds a 1 m apron behind every doorway."""
+
+    def test_east_door_grows_width_and_adds_apron_walls(
+        self, model: DesignModel
+    ) -> None:
+        """Verify an east door widens the room by 1 m with apron walls."""
+        walls = _closed_room(model)
+        model.add_doorway(walls["east"], 5.0, 2.0)
+        fp = export_scenario(model.layout)["floor_plan"]
+        assert fp["width_m"] == ROOM_W + 1.0
+        labels = [w.get("label", "") for w in fp["walls"]]
+        assert sum(label.startswith("apron_wall_") for label in labels) == 2
 
 
 class TestExitMapping:
-    """north=y0 bottom wall; exit centre on the inner face."""
+    """north=y0 bottom wall; exit centre on the inner face.
+
+    Expected coordinates include the +1 m shift of an apron added on the
+    west / y = 0 side.
+    """
 
     @pytest.mark.parametrize(
         "side, expected_xy",
         [
-            ("north", (5.0, 0.5)),
+            ("north", (5.0, 1.5)),
             ("south", (5.0, ROOM_H - 0.5)),
-            ("west", (0.5, 5.0)),
+            ("west", (1.5, 5.0)),
             ("east", (ROOM_W - 0.5, 5.0)),
         ],
     )

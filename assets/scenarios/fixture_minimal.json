@@ -1,20 +1,22 @@
 {
-  "schema_version": "2.0",
+  "schema_version": "2.1",
   "name": "fixture_minimal",
   "floor_plan": {
     "width_m": 10.0,
-    "height_m": 8.0,
+    "height_m": 9.0,
     "walls": [
-      {"x": 0.0, "y": 0.0, "width": 10.0, "height": 0.5, "label": "south_wall"},
-      {"x": 0.0, "y": 7.5, "width": 10.0, "height": 0.5, "label": "north_wall"},
-      {"x": 0.0, "y": 0.0, "width": 0.5, "height": 8.0, "label": "west_wall"},
-      {"x": 9.5, "y": 0.0, "width": 0.5, "height": 8.0, "label": "east_wall"}
+      {"x": 0.0, "y": 1.0, "width": 10.0, "height": 0.5, "label": "south_wall"},
+      {"x": 0.0, "y": 8.5, "width": 10.0, "height": 0.5, "label": "north_wall"},
+      {"x": 0.0, "y": 1.0, "width": 0.5, "height": 8.0, "label": "west_wall"},
+      {"x": 9.5, "y": 1.0, "width": 0.5, "height": 8.0, "label": "east_wall"},
+      {"x": 0.0, "y": 0.0, "width": 4.25, "height": 1.0, "label": "apron_wall_ylow_1"},
+      {"x": 5.75, "y": 0.0, "width": 4.25, "height": 1.0, "label": "apron_wall_ylow_2"}
     ],
     "obstacles": [
-      {"x": 3.0, "y": 3.0, "width": 2.0, "height": 1.0, "label": "obstacle_1"}
+      {"x": 3.0, "y": 4.0, "width": 2.0, "height": 1.0, "label": "obstacle_1"}
     ],
     "exits": [
-      {"x": 5.0, "y": 0.25, "width_m": 1.5, "side": "south", "capacity_per_second": 5, "label": "main_exit"}
+      {"x": 5.0, "y": 1.25, "width_m": 1.5, "side": "south", "capacity_per_second": 1.85, "label": "main_exit"}
     ]
   }
 }

@@ -8,6 +8,9 @@ through unchanged so saving never silently drops them.
 """
 from __future__ import annotations
 
+import dataclasses
+from typing import TypeVar
+
 from crowd_evac.designer.geometry import Rect
 from crowd_evac.designer.layout import (
     Doorway,
@@ -20,9 +23,12 @@ from crowd_evac.designer.layout import (
     validate,
     wall_span,
 )
+from crowd_evac.domain.constants import APRON_DEPTH_M
 from crowd_evac.domain.errors import DesignValidationError
 from crowd_evac.domain.floor_plan import Exit, ExitSide, FloorPlan
+from crowd_evac.domain.floor_plan import Obstacle as PlanObstacle
 from crowd_evac.domain.floor_plan import Wall as PlanWall
+from crowd_evac.scenarios.apron import APRON_LABEL_PREFIX
 from crowd_evac.scenarios.schema import ScenarioData
 
 # An exit centre may sit up to this far from its wall (bundled scenarios
@@ -44,6 +50,7 @@ def layout_from_scenario(plan: FloorPlan, data: ScenarioData) -> Layout:
         DesignValidationError: If the scenario cannot be represented, e.g. an
             exit with no boundary wall, or geometry the designer forbids.
     """
+    plan = strip_apron_plan(plan)
     room = RoomSettings(data["name"], plan.width_m, plan.height_m)
     walls = {i: _wall(i, w) for i, w in enumerate(plan.walls, start=1)}
     base = len(walls)
@@ -60,6 +67,52 @@ def layout_from_scenario(plan: FloorPlan, data: ScenarioData) -> Layout:
     layout = Layout(room, walls, obstacles, doorways)
     validate(layout)
     return layout
+
+
+_P = TypeVar("_P", PlanWall, PlanObstacle, Exit)
+
+
+def strip_apron_plan(plan: FloorPlan) -> FloorPlan:
+    """Remove schema-2.1 egress aprons so the designer edits the bare room.
+
+    Export re-adds aprons, so importing one unstripped would grow the room
+    by the apron depth on every save. Apron walls are recognised by their
+    ``apron_wall_<side>_<n>`` labels; the room shrinks by their depth on each
+    side that has them (the fixed ``APRON_DEPTH_M``) and west / low-y shifts
+    are undone.
+
+    Args:
+        plan: Loaded floor plan, possibly with aprons.
+
+    Returns:
+        *plan* itself when it has no apron walls, else a copy without them.
+    """
+    apron = [w for w in plan.walls if w.label.startswith(APRON_LABEL_PREFIX)]
+    if not apron:
+        return plan
+    sides = {w.label[len(APRON_LABEL_PREFIX):].split("_")[0] for w in apron}
+    d = APRON_DEPTH_M
+    dx = d if "west" in sides else 0.0
+    dy = d if "ylow" in sides else 0.0
+    grow_x = dx + (d if "east" in sides else 0.0)
+    grow_y = dy + (d if "yhigh" in sides else 0.0)
+
+    def shifted(items: tuple[_P, ...]) -> tuple[_P, ...]:
+        """Translate geometry back by the stripped west / low-y depth."""
+        return tuple(
+            dataclasses.replace(i, x=round(i.x - dx, 6), y=round(i.y - dy, 6))
+            for i in items
+        )
+
+    walls = tuple(w for w in plan.walls if w not in apron)
+    return dataclasses.replace(
+        plan,
+        width_m=round(plan.width_m - grow_x, 6),
+        height_m=round(plan.height_m - grow_y, 6),
+        walls=shifted(walls),
+        obstacles=shifted(plan.obstacles),
+        exits=shifted(plan.exits),
+    )
 
 
 def _wall(wall_id: int, w: PlanWall) -> Wall:

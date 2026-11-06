@@ -220,6 +220,15 @@ class TestFloorPlanConstruction:
                             side=ExitSide.SOUTH, capacity_per_second=0),),
             )
 
+    def test_fractional_exit_capacity_accepted(self) -> None:
+        """Verify a positive fractional capacity validates."""
+        fp = FloorPlan(
+            width_m=5.0, height_m=5.0, walls=(), obstacles=(),
+            exits=(Exit(x=1.0, y=0.0, width_m=1.0,
+                        side=ExitSide.SOUTH, capacity_per_second=1.05),),
+        )
+        assert fp.exits[0].capacity_per_second == 1.05
+
     def test_zero_wall_width_raises(self) -> None:
         """Verify Wall with width=0 raises ScenarioValidationError."""
         with pytest.raises(ScenarioValidationError, match="Wall"):

@@ -6,6 +6,7 @@ handling, and CWD-independent bundled asset resolution.
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 import pytest
@@ -114,6 +115,22 @@ class TestLoadScenarioFileHappyPath:
         assert exit_.side is ExitSide.SOUTH
         assert exit_.capacity_per_second == 5
         assert exit_.label == "main_exit"
+
+    def test_fractional_capacity_parsed_as_float(
+        self, tmp_path: Path, valid_scenario_dict: dict[str, object]
+    ) -> None:
+        """Verify capacity_per_second 1.05 loads as float, int still accepted."""
+        fp_data = valid_scenario_dict["floor_plan"]
+        assert isinstance(fp_data, dict)
+        fp_data["exits"][0]["capacity_per_second"] = 1.05
+        path = tmp_path / "frac.json"
+        path.write_text(json.dumps(valid_scenario_dict), encoding="utf-8")
+        floor_plan, _ = load_scenario_file(path)
+        assert floor_plan.exits[0].capacity_per_second == 1.05
+        fp_data["exits"][0]["capacity_per_second"] = 3
+        path.write_text(json.dumps(valid_scenario_dict), encoding="utf-8")
+        floor_plan, _ = load_scenario_file(path)
+        assert isinstance(floor_plan.exits[0].capacity_per_second, float)
 
     def test_scenario_data_is_room_only(self, scenario_file: Path) -> None:
         """Verify ScenarioData carries only version, name and floor plan."""
@@ -312,11 +329,11 @@ class TestLoadBundledScenario:
     def test_bundled_fixture_dimensions(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Verify fixture_minimal dimensions are as specified in the JSON."""
+        """Verify fixture_minimal is 10 x 8 m plus its 1 m low-y apron."""
         monkeypatch.chdir(tmp_path)
         floor_plan, _ = load_bundled_scenario("fixture_minimal")
         assert floor_plan.width_m == 10.0
-        assert floor_plan.height_m == 8.0
+        assert floor_plan.height_m == 9.0
 
     def test_unknown_bundled_name_raises_malformed_error(self) -> None:
         """Verify an unknown bundled name raises MalformedScenarioError."""
@@ -339,10 +356,10 @@ class TestLectureHallScenario:
         assert data["name"] == "lecture_hall"
 
     def test_lecture_hall_dimensions_in_valid_range(self) -> None:
-        """Verify dimensions are positive and reasonable for a lecture hall."""
+        """Verify the 50 x 30 m hall plus west, east and low-y aprons."""
         floor_plan, _ = load_bundled_scenario("lecture_hall")
-        assert floor_plan.width_m == 50.0
-        assert floor_plan.height_m == 30.0
+        assert floor_plan.width_m == 52.0
+        assert floor_plan.height_m == 31.0
 
     def test_lecture_hall_exits_present(self) -> None:
         """Verify at least one exit exists (main exit required)."""
@@ -407,7 +424,7 @@ class TestLectureHallScenario:
 
 
 # ---------------------------------------------------------------------------
-# Bundled rooms — schema 2.0, room configuration only
+# Bundled rooms — schema 2.1, room configuration only
 # ---------------------------------------------------------------------------
 
 
@@ -418,11 +435,12 @@ BUNDLED_ROOMS: tuple[str, ...] = (
     "lecture_hall_no_aisle",
     "model_room_1",
     "open_room_search",
+    "room_model_3",
 )
 
 
 class TestBundledRooms:
-    """Every shipped room is schema 2.0 and holds no run settings."""
+    """Every shipped room is schema 2.1 and holds no run settings."""
 
     def test_catalog_matches_expected_rooms(self) -> None:
         """Verify the bundled room set (no hazard_lecture_hall, no _small)."""
@@ -433,10 +451,10 @@ class TestBundledRooms:
         assert sorted(list_bundled_scenarios()) == sorted(BUNDLED_ROOMS)
 
     @pytest.mark.parametrize("name", BUNDLED_ROOMS)
-    def test_room_loads_as_2_0(self, name: str) -> None:
-        """Verify each room loads with schema 2.0 and its own name."""
+    def test_room_loads_as_2_1(self, name: str) -> None:
+        """Verify each room is migrated (schema 2.1) and keeps its name."""
         _, data = load_bundled_scenario(name)
-        assert data["schema_version"] == "2.0"
+        assert data["schema_version"] == "2.1"
         assert data["name"] == name
 
     @pytest.mark.parametrize("name", BUNDLED_ROOMS)
@@ -450,7 +468,59 @@ class TestBundledRooms:
         assert set(raw) == {"schema_version", "name", "floor_plan"}
 
     def test_no_aisle_room_has_lecture_hall_footprint(self) -> None:
-        """Verify the renamed room keeps its 50 x 30 m geometry."""
+        """Verify the renamed room keeps the lecture hall footprint."""
         floor_plan, _ = load_bundled_scenario("lecture_hall_no_aisle")
-        assert (floor_plan.width_m, floor_plan.height_m) == (50.0, 30.0)
+        hall, _ = load_bundled_scenario("lecture_hall")
+        assert (floor_plan.width_m, floor_plan.height_m) == (52.0, 31.0)
+        assert (floor_plan.width_m, floor_plan.height_m) == (
+            hall.width_m, hall.height_m
+        )
         assert len(floor_plan.obstacles) == 5
+
+
+class TestSchemaVersions:
+    """Schema 2.1 (aprons) loads silently; 2.0 loads with a warning."""
+
+    def _write(
+        self, tmp_path: Path, scenario: dict[str, object], version: str
+    ) -> Path:
+        """Write *scenario* with the given schema version."""
+        path = tmp_path / "v.json"
+        path.write_text(
+            json.dumps({**scenario, "schema_version": version}),
+            encoding="utf-8",
+        )
+        return path
+
+    def test_2_1_loads_without_warning(
+        self,
+        tmp_path: Path,
+        valid_scenario_dict: dict[str, object],
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Verify a 2.1 file loads and logs nothing."""
+        path = self._write(tmp_path, valid_scenario_dict, "2.1")
+        with caplog.at_level(logging.WARNING):
+            _, data = load_scenario_file(path)
+        assert data["schema_version"] == "2.1"
+        assert not caplog.records
+
+    def test_2_0_warns_and_names_migration_script(
+        self,
+        tmp_path: Path,
+        valid_scenario_dict: dict[str, object],
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Verify a 2.0 file still loads but logs the migration hint."""
+        path = self._write(tmp_path, valid_scenario_dict, "2.0")
+        with caplog.at_level(logging.WARNING):
+            load_scenario_file(path)
+        assert "migrate_door_apron.py" in caplog.text
+
+    def test_unsupported_version_raises(
+        self, tmp_path: Path, valid_scenario_dict: dict[str, object]
+    ) -> None:
+        """Verify an unknown version is rejected."""
+        path = self._write(tmp_path, valid_scenario_dict, "3.0")
+        with pytest.raises(MalformedScenarioError, match="unsupported"):
+            load_scenario_file(path)

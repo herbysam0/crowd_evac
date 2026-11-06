@@ -1,27 +1,31 @@
 """Tests for crowd_evac.domain.exit_model (FR-5 R5.1 / R5.2).
 
 Covers:
-  - ExitModel construction: valid, invalid dt, invalid capture_radius
+  - ExitModel construction: valid, invalid dt, invalid agent_radius
   - Egress rate bounded by capacity_per_second over a 1 s window (R5.1)
   - Queue forms when arrivals exceed per-tick capacity
   - Evacuated count equals initial population on a fully solvable scenario
   - Egressed agent is removed from AgentState (R5.2)
   - ticks_since_last_egress resets on egress, accumulates otherwise
-  - Segment-distance capture: wide exit captures agents along its full span
-  - Agent outside exit's lateral span and beyond capture_radius not captured
-  - Multi-exit: agent is routed to nearest exit; goal entry is updated
-  - _segment_distances pure-function geometry
+  - Door clearing: agents queue only once past the door plane, within span
+  - room_model_3 regression: no egress through a wall (issue #17)
+  - Door gate: held at the line, capacity-metered release, placement past
+    the line, evacuation at the end of the egress path
+  - Float capacity token bucket (1.05 /s)
+  - Multi-exit: agent is routed to the exit it cleared; goal entry updated
 """
 from __future__ import annotations
 
 import numpy as np
 import pytest
 
-from crowd_evac.domain.constants import DT
-from crowd_evac.domain.exit_model import ExitModel, _segment_distances
+from crowd_evac.domain.constants import AGENT_RADIUS, DT
+from crowd_evac.domain.exit_model import ExitModel
 from crowd_evac.domain.floor_plan import Exit, ExitSide, FloorPlan
 
 from .conftest import MakeState
+
+RADIUS = AGENT_RADIUS
 
 
 # ---------------------------------------------------------------------------
@@ -109,12 +113,12 @@ class TestExitModelConstruction:
         with pytest.raises(ValueError, match="dt must be positive"):
             ExitModel(simple_floor, dt=0.0)
 
-    def test_init_nonpositive_capture_radius_raises(
+    def test_init_nonpositive_agent_radius_raises(
         self, simple_floor: FloorPlan
     ) -> None:
-        """capture_radius ≤ 0 raises ValueError."""
-        with pytest.raises(ValueError, match="capture_radius must be positive"):
-            ExitModel(simple_floor, capture_radius=-0.5)
+        """agent_radius ≤ 0 raises ValueError."""
+        with pytest.raises(ValueError, match="radius must be positive"):
+            ExitModel(simple_floor, agent_radius=-0.5)
 
 
 # ---------------------------------------------------------------------------
@@ -170,6 +174,23 @@ class TestEgressCapacity:
         assert not state.alive[0]
         assert model.evacuated_count == 1
 
+    def test_step_return_counts_removal_on_release(
+        self, simple_floor: FloorPlan, make_state: MakeState
+    ) -> None:
+        """Boundary door: step() reports agents removed directly on release.
+
+        Regression: the return value (which feeds the tick event, throughput
+        series and dashboard) omitted these, so headless runs showed zero.
+        """
+        state = make_state([(5.0, 0.3)] * 8)
+        model = ExitModel(simple_floor, dt=DT)
+        reported = 0
+        for _ in range(round(2.0 / DT)):
+            egressed = model.step(state)
+            assert egressed == sum(model.last_egress_per_exit)
+            reported += egressed
+        assert reported == model.evacuated_count == 8
+
 
 # ---------------------------------------------------------------------------
 # Stall counter
@@ -205,8 +226,8 @@ class TestStallCounter:
     def test_trapped_agent_accumulates_stall_ticks(
         self, simple_floor: FloorPlan, make_state: MakeState
     ) -> None:
-        """Stall counter reaches target for an immobile agent beyond capture."""
-        state = make_state([(5.0, 9.0)])  # beyond capture_radius, no velocity
+        """Stall counter reaches target for an immobile agent far from the door."""
+        state = make_state([(5.0, 9.0)])  # far from the door, no velocity
         model = ExitModel(simple_floor, dt=DT)
         stall_window = 10
         for _ in range(stall_window):
@@ -215,20 +236,20 @@ class TestStallCounter:
 
 
 # ---------------------------------------------------------------------------
-# Segment-distance capture geometry
+# Door clearing
 # ---------------------------------------------------------------------------
 
 
-class TestSegmentDistanceCapture:
-    """Capture uses perpendicular distance to the exit segment."""
+class TestDoorClearing:
+    """Agents queue only once their body has cleared the door plane."""
 
-    def test_agent_at_exit_lateral_edge_is_captured(
+    def test_agent_at_exit_lateral_edge_is_queued(
         self, simple_floor: FloorPlan, make_state: MakeState
     ) -> None:
-        """Agent near the lateral edge of a wide exit is captured.
+        """Agent pressed against a boundary door near its lateral edge egresses.
 
-        Opening spans x ∈ [4, 6].  Agent at (4.1, 0.3):
-        segment distance = 0.3 m < capture_radius (1.0 m).
+        Opening spans x ∈ [4, 6] on the y = 0 boundary (nothing behind it),
+        so the clearing depth shrinks to the reachable ``-(R + margin)``.
         """
         state = make_state([(4.1, 0.3)])
         model = ExitModel(simple_floor, dt=DT)
@@ -236,61 +257,151 @@ class TestSegmentDistanceCapture:
             model.step(state)
         assert model.evacuated_count == 1
 
-    def test_agent_outside_lateral_span_and_far_not_captured(
+    def test_agent_outside_lateral_span_not_queued(
         self, simple_floor: FloorPlan, make_state: MakeState
     ) -> None:
-        """Agent past exit lateral extent is not captured.
-
-        Opening spans x ∈ [4, 6].  Agent at (0.0, 0.5):
-        nearest segment point is (4, 0); distance ≈ 4.03 m > 1.0 m.
-        """
-        state = make_state([(0.0, 0.5)])
+        """Agent beside the opening (x = 0, span [4, 6]) is never queued."""
+        state = make_state([(0.0, 0.3)])
         model = ExitModel(simple_floor, dt=DT)
         for _ in range(round(1.0 / DT)):
             model.step(state)
         assert model.evacuated_count == 0
         assert state.active_indices.size == 1
 
-    def test_segment_distances_horizontal_exit(self) -> None:
-        """_segment_distances returns correct values for a SOUTH exit."""
-        centres = np.array([[5.0, 0.0]], dtype=np.float64)
-        half_widths = np.array([1.0], dtype=np.float64)
-        is_horiz = np.array([True], dtype=np.bool_)
+    def test_agent_inside_room_near_door_not_queued(
+        self, simple_floor: FloorPlan, make_state: MakeState
+    ) -> None:
+        """Agent 0.5 m inside the plane — within the old 1 m radius — waits."""
+        state = make_state([(5.0, 0.5)])
+        model = ExitModel(simple_floor, dt=DT)
+        model.step(state)
+        assert len(model._queues[0]) == 0
 
-        # Agent directly above centre: nearest point (5, 0), dist = 0.5.
-        d = _segment_distances(
-            np.array([[5.0, 0.5]], dtype=np.float64),
-            centres, half_widths, is_horiz,
+
+class TestRoomModel3Regression:
+    """Issue #17: lower-left room agents must not egress through wall_5."""
+
+    def test_corner_agent_below_wall_is_never_queued(
+        self, room_model_3: FloorPlan, make_state: MakeState
+    ) -> None:
+        """Agent in the lower room's top-left corner (1.28, 7.0) stays put."""
+        state = make_state([(1.28, 7.0)])
+        model = ExitModel(room_model_3, dt=DT)
+        for _ in range(round(5.0 / DT)):
+            model.step(state)
+        assert model.evacuated_count == 0
+        assert state.goal[0] == -1
+        np.testing.assert_allclose(state.pos[0], [1.28, 7.0])
+
+
+class TestDoorGate:
+    """Agents are held at the door line until the door releases them.
+
+    room_model_3 west door: line x = 1.0, outward -x, span y 7.4-9.0,
+    1 m carved gap behind it, capacity 1.0 /s.
+    """
+
+    def test_agent_crossing_line_is_held_and_queued(
+        self, room_model_3: FloorPlan, make_state: MakeState
+    ) -> None:
+        """An agent pushing past the line is clamped flush and queued."""
+        state = make_state([(0.9, 8.2)], vel=[(-1.0, 0.3)])
+        model = ExitModel(room_model_3, dt=DT)
+        model.step(state)
+        np.testing.assert_allclose(state.pos[0], [1.0 + RADIUS, 8.2])
+        np.testing.assert_allclose(state.vel[0], [0.0, 0.3])
+        assert model.queue_lengths == (1, 0)
+        assert state.goal[0] == 0
+
+    def test_release_places_agent_past_line(
+        self, room_model_3: FloorPlan, make_state: MakeState
+    ) -> None:
+        """At 1.0 /s the first token arrives on tick 20; agent jumps the line."""
+        state = make_state([(1.0 + RADIUS, 8.2)])
+        model = ExitModel(room_model_3, dt=DT)
+        for _ in range(19):
+            model.step(state)
+        assert model.queue_lengths == (1, 0)
+        model.step(state)
+        np.testing.assert_allclose(state.pos[0], [1.0 - RADIUS, 8.2])
+        assert model.last_release_per_exit == (1, 0)
+        assert state.alive[0]
+        assert model.evacuated_count == 0
+        assert model.queue_lengths == (0, 0)
+
+    def test_released_agent_free_to_walk_and_evacuated_at_gap_end(
+        self, room_model_3: FloorPlan, make_state: MakeState
+    ) -> None:
+        """Released agents are not gated; they count at the gap's outer end."""
+        state = make_state([(1.0 + RADIUS, 8.2)])
+        model = ExitModel(room_model_3, dt=DT)
+        for _ in range(20):
+            model.step(state)
+        state.pos[0] = (0.5, 8.2)  # walked on; not yet at the outer end
+        model.step(state)
+        assert state.alive[0]
+        np.testing.assert_allclose(state.pos[0], [0.5, 8.2])
+        state.pos[0] = (0.3, 8.2)  # reached the outer end of the gap
+        assert model.step(state) == 1
+        assert not state.alive[0]
+        assert model.evacuated_count == 1
+        assert model.last_egress_per_exit == (1, 0)
+
+    def test_release_rate_bounded_by_capacity(
+        self, room_model_3: FloorPlan, make_state: MakeState
+    ) -> None:
+        """Six agents at a 1.0 /s door: exactly 3 released in 3 s, FIFO."""
+        ys = [7.7, 8.0, 8.3, 8.6, 8.9, 7.5]
+        state = make_state([(1.0 + RADIUS, y) for y in ys])
+        model = ExitModel(room_model_3, dt=DT)
+        released = 0
+        for _ in range(round(3.0 / DT)):
+            model.step(state)
+            released += model.last_release_per_exit[0]
+        assert released == 3
+        past = state.pos[:, 0] < 1.0
+        np.testing.assert_array_equal(past, [True] * 3 + [False] * 3)
+        assert model.queue_lengths == (3, 0)
+
+    def test_agent_already_past_line_is_not_pulled_back(
+        self, room_model_3: FloorPlan, make_state: MakeState
+    ) -> None:
+        """An agent spawned inside the gap counts as released, not gated."""
+        state = make_state([(0.5, 8.2)])
+        model = ExitModel(room_model_3, dt=DT)
+        model.step(state)
+        np.testing.assert_allclose(state.pos[0], [0.5, 8.2])
+        assert model.queue_lengths == (0, 0)
+
+    def test_placement_kept_inside_span(
+        self, room_model_3: FloorPlan, make_state: MakeState
+    ) -> None:
+        """An agent queued at the span edge is placed a radius inside it."""
+        state = make_state([(1.0 + RADIUS, 7.3)])
+        model = ExitModel(room_model_3, dt=DT)
+        for _ in range(20):
+            model.step(state)
+        np.testing.assert_allclose(
+            state.pos[0], [1.0 - RADIUS, 7.4 + RADIUS]
         )
-        assert abs(float(d[0, 0]) - 0.5) < 1e-9
 
-        # Agent outside left edge: nearest point (4, 0), dist = 1.0.
-        d2 = _segment_distances(
-            np.array([[3.0, 0.0]], dtype=np.float64),
-            centres, half_widths, is_horiz,
+
+class TestFloatCapacity:
+    """Fractional capacity accumulates in the token bucket."""
+
+    def test_capacity_1_05_drains_21_in_20_seconds(
+        self, make_state: MakeState
+    ) -> None:
+        """1.05 agents/s x 20 s = 21 egresses from a large queue."""
+        floor = FloorPlan(
+            10.0, 10.0, (), (),
+            (Exit(5.0, 0.0, 2.0, ExitSide.SOUTH, 1.05, "s"),),
         )
-        assert abs(float(d2[0, 0]) - 1.0) < 1e-9
-
-    def test_segment_distances_vertical_exit(self) -> None:
-        """_segment_distances returns correct values for an EAST exit."""
-        # EAST exit at (10, 5), width 2 → segment y ∈ [4, 6] at x = 10.
-        centres = np.array([[10.0, 5.0]], dtype=np.float64)
-        half_widths = np.array([1.0], dtype=np.float64)
-        is_horiz = np.array([False], dtype=np.bool_)  # EAST → vertical
-
-        # Agent at (9.5, 5.0): nearest point (10, 5), dist = 0.5.
-        d = _segment_distances(
-            np.array([[9.5, 5.0]], dtype=np.float64),
-            centres, half_widths, is_horiz,
-        )
-        assert abs(float(d[0, 0]) - 0.5) < 1e-9
-
-        # Agent at (10.0, 2.0): nearest point (10, 4), dist = 2.0.
-        d2 = _segment_distances(
-            np.array([[10.0, 2.0]], dtype=np.float64),
-            centres, half_widths, is_horiz,
-        )
-        assert abs(float(d2[0, 0]) - 2.0) < 1e-9
+        state = make_state([(5.0, 0.3)] * 40)
+        model = ExitModel(floor, dt=DT)
+        for _ in range(round(20.0 / DT)):
+            model.step(state)
+        assert model.evacuated_count == 21
 
 
 # ---------------------------------------------------------------------------
@@ -299,13 +410,13 @@ class TestSegmentDistanceCapture:
 
 
 class TestMultiExitRouting:
-    """Agents are queued to the nearest exit and goal entry is updated."""
+    """Agents are queued to the exit they cleared; goal entry is updated."""
 
     def test_agent_queued_to_nearest_exit(
         self, two_exit_floor: FloorPlan, make_state: MakeState
     ) -> None:
-        """Agent at (1.0, 0.5) routes to west exit (index 0), not east."""
-        state = make_state([(1.0, 0.5)])
+        """Agent at (1.0, 0.3) routes to west exit (index 0), not east."""
+        state = make_state([(1.0, 0.3)])
         model = ExitModel(two_exit_floor, dt=DT)
         model.step(state)
         assert len(model._queues[0]) == 1  # west queue

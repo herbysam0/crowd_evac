@@ -93,6 +93,8 @@ class TestDoorwayTool:
         bottom_wall_with_door(ctl)
         door = next(iter(ctl.model.layout.doorways.values()))
         assert door.center == 5.0 and door.width_m == DEFAULT_DOOR_WIDTH_M
+        assert DEFAULT_DOOR_WIDTH_M == 0.85
+        assert door.capacity_per_second == 1.05
         assert ctl.selection == Selection("doorway", door.id)
 
     def test_click_uses_settable_width(self, ctl: DesignController) -> None:

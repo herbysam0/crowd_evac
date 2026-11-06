@@ -1,14 +1,25 @@
-"""Per-exit capacity queuing and agent egress (FR-5 R5.1 / R5.2).
+"""Gated per-exit door queues and agent egress (FR-5 R5.1 / R5.2, issue #17).
 
-Agents enter an exit's FIFO queue when they come within
-``capture_radius`` of the **nearest point on that exit's opening
-segment** (not the centre), so wide exits capture approaching agents
-uniformly along their full width.  Each tick the queue drains at most
-``floor(tokens)`` agents, where tokens accumulate at
-``exit.capacity_per_second * dt`` per tick (capped at one second of
-credit to limit burst throughput).  Egressed agents are removed from
-:class:`~crowd_evac.domain.agent_state.AgentState` and counted in
-:attr:`ExitModel.evacuated_count`.
+Each door is a gate metered by its ``capacity_per_second``:
+
+1. **Gate** — no agent passes a door line unless the door released it.
+   Agents whose body reaches the line are held there (centre one radius
+   inside, outward velocity zeroed); the crowd behind them backs up
+   physically.
+2. **Queue** — agents held at a line join that door's FIFO queue; agents
+   that drift away from the line drop out (and rejoin at the back later).
+3. **Release** — a token bucket filling at ``capacity_per_second * dt`` per
+   tick (capped at one second of credit) releases agents FIFO. A released
+   agent is placed one radius past the line, inside the span, and keeps
+   walking. Doors with no room behind them for a whole body (a boundary
+   door without an apron) evacuate the released agent immediately.
+4. **Evacuate** — a released agent is removed from
+   :class:`~crowd_evac.domain.agent_state.AgentState` and counted in
+   :attr:`ExitModel.evacuated_count` once it reaches the outer end of the
+   egress path (gap / apron edge).
+
+Walls collide and the gate holds the line, so nobody is ever evacuated
+through a wall or faster than the door's capacity.
 
 No framework or I/O imports — pure Python + NumPy.
 """
@@ -19,76 +30,63 @@ import math
 from collections import deque
 
 import numpy as np
-import numpy.typing as npt
 
 from crowd_evac.domain.agent_state import AgentState
-from crowd_evac.domain.constants import DT, EXIT_CAPTURE_RADIUS
-from crowd_evac.domain.floor_plan import ExitSide, FloorPlan
+from crowd_evac.domain.constants import AGENT_RADIUS, DT
+from crowd_evac.domain.door_geometry import DOOR_CLEAR_MARGIN_M
+from crowd_evac.domain.egress_geometry import (
+    EgressGeometry,
+    gate,
+    in_band,
+    outward_distances,
+    placement,
+)
+from crowd_evac.domain.floor_plan import FloorPlan
 
 logger = logging.getLogger(__name__)
 
 
 class ExitModel:
-    """Per-exit queuing and egress processing for a floor plan.
-
-    Each exit owns a FIFO queue and a token-bucket accumulator that fills
-    at ``exit.capacity_per_second * dt`` per tick (capped at one second
-    of credit to bound burst throughput).  Agents within
-    ``capture_radius`` of the nearest exit opening segment are added to
-    that exit's queue; queues drain FIFO until the token bucket empties.
-
-    Removal delegates to
-    :meth:`~crowd_evac.domain.agent_state.AgentState.remove`; egressed
-    agents neither exert nor receive forces in subsequent ticks.
+    """Gated door queues with capacity-metered release for a floor plan.
 
     Attributes:
         floor_plan: Floor plan whose exits are managed.
         dt: Fixed simulation timestep in seconds.
-        capture_radius: Perpendicular distance from an exit opening
-            segment at which an agent enters the queue.
     """
 
     def __init__(
         self,
         floor_plan: FloorPlan,
         dt: float = DT,
-        capture_radius: float = EXIT_CAPTURE_RADIUS,
+        agent_radius: float = AGENT_RADIUS,
     ) -> None:
-        """Initialise queues and token buckets for every exit.
+        """Initialise queues, token buckets and door geometry.
 
         Args:
             floor_plan: Defines exit positions, widths, and capacities.
             dt: Simulation timestep in seconds.  Must be positive.
-            capture_radius: Distance from the exit segment triggering
-                queue entry, in metres.  Must be positive.
+            agent_radius: Body radius in metres used for the door line,
+                placement and evacuation depth.  Must be positive.
 
         Raises:
-            ValueError: If *dt* or *capture_radius* is not positive.
+            ValueError: If *dt* or *agent_radius* is not positive.
         """
         if dt <= 0.0:
             raise ValueError(f"dt must be positive, got {dt!r}")
-        if capture_radius <= 0.0:
-            raise ValueError(
-                f"capture_radius must be positive, got {capture_radius!r}"
-            )
         self.floor_plan = floor_plan
         self.dt = dt
-        self.capture_radius = capture_radius
-
         n = len(floor_plan.exits)
+        self._geometry = EgressGeometry.from_floor_plan(
+            floor_plan, agent_radius
+        )
         self._queues: list[deque[int]] = [deque() for _ in range(n)]
-        # Global set of agent IDs already in any queue (prevents re-entry).
-        self._queued_set: set[int] = set()
-        # Token bucket per exit; capped at capacity_per_second (1 s of credit).
+        # Agent id -> door that released it (walking out, not yet removed).
+        self._released: dict[int, int] = {}
         self._tokens: list[float] = [0.0] * n
         self._evacuated: int = 0
         self._ticks_since_last_egress: int = 0
-        # Per-exit egress count from the most recent step() call.
         self._last_per_exit: list[int] = [0] * n
-        # Precomputed segment geometry for vectorised arrival queries.
-        self._centres, self._half_widths, self._is_horiz = (
-            _precompute_segments(floor_plan)
-        )
+        self._last_release_per_exit: list[int] = [0] * n
 
     # ------------------------------------------------------------------
     # Public read-only properties
@@ -96,24 +94,33 @@ class ExitModel:
 
     @property
     def evacuated_count(self) -> int:
-        """Total agents successfully egressed since this model was created."""
+        """Total agents evacuated (removed) since this model was created."""
         return self._evacuated
 
     @property
     def last_egress_per_exit(self) -> tuple[int, ...]:
-        """Per-exit egress counts from the most recent :meth:`step` call.
+        """Per-exit evacuations (removals) from the most recent :meth:`step`.
 
-        Indices correspond to exits in
-        :attr:`~crowd_evac.domain.floor_plan.FloorPlan.exits`.  All zeroes
-        before the first :meth:`step` call.
+        Indices follow
+        :attr:`~crowd_evac.domain.floor_plan.FloorPlan.exits`; all zero
+        before the first call.  Sums to that tick's :meth:`step` result.
         """
         return tuple(self._last_per_exit)
 
     @property
-    def ticks_since_last_egress(self) -> int:
-        """Consecutive ticks in which no agent has egressed.
+    def last_release_per_exit(self) -> tuple[int, ...]:
+        """Per-exit door releases (gate throughput) from the last tick."""
+        return tuple(self._last_release_per_exit)
 
-        Resets to zero whenever at least one agent egresses in a tick.
+    @property
+    def queue_lengths(self) -> tuple[int, ...]:
+        """Agents currently held in each door queue."""
+        return tuple(len(q) for q in self._queues)
+
+    @property
+    def ticks_since_last_egress(self) -> int:
+        """Consecutive ticks with no door release and no evacuation.
+
         Used by
         :func:`~crowd_evac.application.termination.is_evacuation_complete`
         to detect the 'no further egress possible' terminal state (R5.3).
@@ -125,185 +132,140 @@ class ExitModel:
     # ------------------------------------------------------------------
 
     def step(self, state: AgentState) -> int:
-        """Process one simulation tick: enqueue arrivals then drain exits.
-
-        Steps executed in order:
-
-        1. Each active agent within *capture_radius* of an exit opening
-           segment (and not yet queued) is added to the nearest exit's
-           FIFO queue.  The agent's ``goal`` entry is set to that exit's
-           index (0-based).
-        2. Each exit's token bucket is refilled by
-           ``capacity_per_second * dt``, capped at one second of credit.
-        3. Each queue drains FIFO until ``floor(tokens)`` slots have been
-           consumed.  Alive agents are removed from *state* via
-           :meth:`~crowd_evac.domain.agent_state.AgentState.remove`;
-           dead agents already in the queue are discarded without
-           consuming a capacity token.
-        4. :attr:`evacuated_count` is incremented by the egress count;
-           :attr:`ticks_since_last_egress` resets to zero on any egress,
-           otherwise increments by one.
+        """Process one tick: gate, queue, release, evacuate.
 
         Args:
-            state: Agent population to update in place.
+            state: Agent population, updated in place (positions and
+                velocities of gated / released agents, ``goal`` of queued
+                agents, removal of evacuated agents).
 
         Returns:
-            Number of agents egressed this tick (zero or more).
+            Number of agents evacuated (removed) this tick.
         """
-        self._enqueue_arrivals(state)
-        egressed = self._drain_queues(state)
-        if egressed > 0:
+        self._last_per_exit = [0] * len(self.floor_plan.exits)
+        self._last_release_per_exit = [0] * len(self.floor_plan.exits)
+        self._gate_and_queue(state)
+        released = self._release(state)
+        self._evacuate(state)
+        # Count from the per-exit tally: it includes agents removed directly
+        # on release (doors with no room behind them) as well as released
+        # agents reaching the end of the egress path.
+        evacuated = sum(self._last_per_exit)
+        if released or evacuated:
             self._ticks_since_last_egress = 0
         else:
             self._ticks_since_last_egress += 1
-        return egressed
+        return evacuated
 
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
 
-    def _enqueue_arrivals(self, state: AgentState) -> None:
-        """Add newly-arrived agents to exit queues; nearest segment wins."""
+    def hold_at_doors(self, state: AgentState) -> None:
+        """Clamp unreleased agents back to the door lines (the gate alone).
+
+        Idempotent. :meth:`step` applies it itself; the simulation also runs
+        it inside each no-overlap projection pass so the gate behaves like a
+        wall there and the projection does not push held agents through it.
+
+        Args:
+            state: Agent population; positions / velocities of agents
+                straddling a door line are corrected in place.
+        """
         active = state.active_indices
-        if active.size == 0 or len(self.floor_plan.exits) == 0:
+        if active.size == 0:
             return
+        released = np.isin(active, np.fromiter(self._released, np.intp))
+        pos = state.pos[active]
+        vel = state.vel[active]
+        already_past = gate(pos, vel, released, self._geometry)
+        state.pos[active] = pos
+        state.vel[active] = vel
+        for row in np.flatnonzero(already_past >= 0):
+            self._released[int(active[row])] = int(already_past[row])
 
-        pos = state.pos[active]  # (A, 2)
-        dist = _segment_distances(
-            pos, self._centres, self._half_widths, self._is_horiz
-        )  # (A, n_exits)
-
-        min_dist: npt.NDArray[np.float64] = dist.min(axis=1)  # (A,)
-        nearest: npt.NDArray[np.intp] = (
-            dist.argmin(axis=1).astype(np.intp)
-        )  # (A,)
-        in_range: npt.NDArray[np.bool_] = min_dist < self.capture_radius
-
-        for agent_idx, exit_idx, close in zip(active, nearest, in_range):
-            ai = int(agent_idx)
-            if close and ai not in self._queued_set:
-                ei = int(exit_idx)
-                self._queues[ei].append(ai)
-                self._queued_set.add(ai)
-                state.goal[ai] = ei
-
-    def _drain_queues(self, state: AgentState) -> int:
-        """Drain exit queues up to token capacity; return total egressed."""
-        total_egressed = 0
-        to_remove: list[int] = []
-        # Reset per-exit counters so last_egress_per_exit reflects this tick.
-        self._last_per_exit = [0] * len(self.floor_plan.exits)
-
-        for i, exit_ in enumerate(self.floor_plan.exits):
-            cap = exit_.capacity_per_second
-            # Refill token bucket, capped at 1 second of credit.
-            self._tokens[i] = min(
-                self._tokens[i] + cap * self.dt, float(cap)
+    def _gate_and_queue(self, state: AgentState) -> None:
+        """Hold unreleased agents at door lines and refresh the queues."""
+        self.hold_at_doors(state)
+        active = state.active_indices
+        if active.size == 0:
+            for q in self._queues:
+                q.clear()
+            return
+        geom = self._geometry
+        released = np.isin(active, np.fromiter(self._released, np.intp))
+        pos = state.pos[active]
+        at_line = (
+            in_band(pos, geom)
+            & (outward_distances(pos, geom) >= -geom.radius - DOOR_CLEAR_MARGIN_M)
+            & ~released[:, np.newaxis]
+        )
+        door_of = {
+            int(active[row]): int(np.argmax(at_line[row]))
+            for row in np.flatnonzero(at_line.any(axis=1))
+        }
+        for e, queue in enumerate(self._queues):
+            # Keep FIFO order of agents still at this line; append arrivals.
+            kept = [ai for ai in queue if door_of.get(ai) == e]
+            queued = set(kept)
+            kept.extend(
+                ai for ai, d in door_of.items() if d == e and ai not in queued
             )
-            allowed = math.floor(self._tokens[i])
-            drained = 0
-            while self._queues[i] and drained < allowed:
-                ai = self._queues[i].popleft()
-                self._queued_set.discard(ai)
+            self._queues[e] = deque(kept)
+            for ai in kept:
+                state.goal[ai] = e
+
+    def _release(self, state: AgentState) -> int:
+        """Release queue heads up to token capacity; return release count."""
+        immediate: list[tuple[int, int]] = []
+        total = 0
+        for e, exit_ in enumerate(self.floor_plan.exits):
+            cap = exit_.capacity_per_second
+            self._tokens[e] = min(self._tokens[e] + cap * self.dt, float(cap))
+            allowed = math.floor(self._tokens[e])
+            ids: list[int] = []
+            while self._queues[e] and len(ids) < allowed:
+                ai = self._queues[e].popleft()
                 if state.alive[ai]:
-                    to_remove.append(ai)
-                    drained += 1
-                # Dead agents are discarded without consuming a capacity token.
-            self._tokens[i] -= drained
-            self._last_per_exit[i] = drained
-            total_egressed += drained
+                    ids.append(ai)
+            self._tokens[e] -= len(ids)
+            self._last_release_per_exit[e] = len(ids)
+            total += len(ids)
+            if not ids:
+                continue
+            if self._geometry.place_after[e]:
+                rows = np.asarray(ids, dtype=np.intp)
+                state.pos[rows] = placement(state.pos[rows], e, self._geometry)
+                self._released.update((ai, e) for ai in ids)
+            else:
+                immediate.extend((ai, e) for ai in ids)
+        self._remove(state, immediate)
+        return total
 
-        if to_remove:
-            state.remove(to_remove)
-            self._evacuated += len(to_remove)
-            logger.debug("Egressed %d agents this tick.", len(to_remove))
+    def _evacuate(self, state: AgentState) -> int:
+        """Remove released agents that reached the end of the egress path."""
+        if not self._released:
+            return 0
+        ids = np.fromiter(self._released, dtype=np.intp)
+        doors = np.fromiter(self._released.values(), dtype=np.intp)
+        s = outward_distances(state.pos[ids], self._geometry)
+        depth = s[np.arange(ids.size), doors]
+        alive = state.alive[ids]
+        done = ~alive | (depth >= self._geometry.remove_depth[doors])
+        for ai in ids[done]:
+            del self._released[int(ai)]
+        out = alive & done
+        return self._remove(
+            state, [(int(a), int(d)) for a, d in zip(ids[out], doors[out])]
+        )
 
-        return total_egressed
-
-
-# ---------------------------------------------------------------------------
-# Module-level helpers (pure functions, no state)
-# ---------------------------------------------------------------------------
-
-
-def _precompute_segments(
-    floor_plan: FloorPlan,
-) -> tuple[
-    npt.NDArray[np.float64],
-    npt.NDArray[np.float64],
-    npt.NDArray[np.bool_],
-]:
-    """Extract per-exit segment data for vectorised distance queries.
-
-    Args:
-        floor_plan: Floor plan containing exit definitions.
-
-    Returns:
-        A three-tuple of:
-
-        - ``centres``: float64 array of shape ``(n_exits, 2)`` with exit
-          ``(x, y)`` centres.
-        - ``half_widths``: float64 array of shape ``(n_exits,)`` with
-          ``width_m / 2`` for each exit.
-        - ``is_horiz``: bool array of shape ``(n_exits,)``; ``True`` for
-          NORTH / SOUTH exits whose opening runs along the x-axis.
-    """
-    exits = floor_plan.exits
-    n = len(exits)
-    centres = np.empty((n, 2), dtype=np.float64)
-    half_widths = np.empty(n, dtype=np.float64)
-    is_horiz = np.empty(n, dtype=np.bool_)
-    for i, e in enumerate(exits):
-        centres[i, 0] = e.x
-        centres[i, 1] = e.y
-        half_widths[i] = e.width_m / 2.0
-        is_horiz[i] = e.side in (ExitSide.NORTH, ExitSide.SOUTH)
-    return centres, half_widths, is_horiz
-
-
-def _segment_distances(
-    pos: npt.NDArray[np.float64],
-    centres: npt.NDArray[np.float64],
-    half_widths: npt.NDArray[np.float64],
-    is_horiz: npt.NDArray[np.bool_],
-) -> npt.NDArray[np.float64]:
-    """Distance from each agent to the nearest point on each exit segment.
-
-    For a NORTH / SOUTH exit the opening runs along the x-axis::
-
-        nearest_x = clamp(agent_x,  cx − hw,  cx + hw)
-        nearest_y = cy
-
-    For an EAST / WEST exit the opening runs along the y-axis::
-
-        nearest_x = cx
-        nearest_y = clamp(agent_y,  cy − hw,  cy + hw)
-
-    Args:
-        pos: Agent positions, shape ``(A, 2)``.
-        centres: Exit centres, shape ``(n_exits, 2)``.
-        half_widths: Exit half-widths, shape ``(n_exits,)``.
-        is_horiz: ``True`` for NORTH / SOUTH exits, shape ``(n_exits,)``.
-
-    Returns:
-        Float64 distance array of shape ``(A, n_exits)``.
-    """
-    # Column vectors broadcast against (n_exits,) rows → (A, n_exits).
-    ax = pos[:, 0:1]    # (A, 1)
-    ay = pos[:, 1:2]    # (A, 1)
-    cx = centres[:, 0]  # (n_exits,)
-    cy = centres[:, 1]  # (n_exits,)
-    hw = half_widths    # (n_exits,)
-
-    # Horizontal exits: clamp agent_x to [cx−hw, cx+hw]; pin agent_y to cy.
-    nx: npt.NDArray[np.float64] = np.where(
-        is_horiz, np.clip(ax, cx - hw, cx + hw), cx
-    )  # (A, n_exits)
-    ny: npt.NDArray[np.float64] = np.where(
-        is_horiz, cy, np.clip(ay, cy - hw, cy + hw)
-    )  # (A, n_exits)
-
-    dist: npt.NDArray[np.float64] = np.sqrt(
-        (ax - nx) ** 2 + (ay - ny) ** 2
-    )
-    return dist
+    def _remove(self, state: AgentState, items: list[tuple[int, int]]) -> int:
+        """Remove ``(agent, door)`` pairs from *state*; return the count."""
+        if not items:
+            return 0
+        state.remove([ai for ai, _ in items])
+        for _, e in items:
+            self._last_per_exit[e] += 1
+        self._evacuated += len(items)
+        logger.debug("Evacuated %d agents this tick.", len(items))
+        return len(items)
