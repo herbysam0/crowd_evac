@@ -16,6 +16,7 @@ from crowd_evac.adapters.render.arcade_renderer import (
     WALL_COLOR,
 )
 from crowd_evac.adapters.render.designer_style import LABEL_BG_COLOR
+from crowd_evac.adapters.render.grid_overlay import draw_grid
 from crowd_evac.adapters.render.viewport import Viewport
 from crowd_evac.designer.controller import RubberBand, Tool
 from crowd_evac.designer.geometry import Rect, wall_rect
@@ -24,7 +25,6 @@ from crowd_evac.designer.model import DesignModel
 from crowd_evac.designer.placement import Selection
 
 CANVAS_MARGIN_PX: float = 40.0
-GRID_LINE_COLOR: RGBA255 = (60, 60, 72, 255)
 SELECTION_COLOR: RGBA255 = (255, 220, 60, 255)
 BAND_COLOR: RGBA255 = (120, 180, 255, 150)
 SELECTION_BORDER_PX: float = 2.0
@@ -128,12 +128,7 @@ def draw_room(vp: Viewport, model: DesignModel) -> None:
     layout = model.layout
     room = layout.room
     _fill(vp, (0.0, 0.0, room.width_m, room.height_m), FLOOR_COLOR)
-    for i in range(1, int(room.width_m)):
-        a, b = vp.to_px(i, 0.0), vp.to_px(i, room.height_m)
-        arcade.draw_line(a[0], a[1], b[0], b[1], GRID_LINE_COLOR)
-    for j in range(1, int(room.height_m)):
-        a, b = vp.to_px(0.0, j), vp.to_px(room.width_m, j)
-        arcade.draw_line(a[0], a[1], b[0], b[1], GRID_LINE_COLOR)
+    draw_grid(room.width_m, room.height_m, vp.ppm, vp.ox, vp.oy)
     for obs in layout.obstacles.values():
         _fill(vp, obs.rect, OBSTACLE_COLOR)
     for wall_id in layout.walls:
