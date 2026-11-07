@@ -49,6 +49,11 @@ def _make_screen(width: int, height: int, scale: float) -> types.SimpleNamespace
     )
 
 
+# These tests check wiring, not the default room; lecture_hall costs ~2.5 s to
+# build (fine 0.05 m grid), so they use the small fixture room instead.
+_SMALL_ROOM = "fixture_minimal"
+
+
 class TestGetLogicalScreenSize:
     """Tests for :func:`_get_logical_screen_size`."""
 
@@ -211,7 +216,7 @@ class TestBuildSimulationFromScenario:
 
     def test_one_headless_step_advances_tick(self) -> None:
         """Verify a single headless step moves tick from 0 to 1."""
-        sim, _ = build_simulation_from_scenario()
+        sim, _ = build_simulation_from_scenario(_SMALL_ROOM)
         sim.step()
         assert sim.tick == 1
 
@@ -222,7 +227,7 @@ class TestBuildSimulationFromScenario:
         :class:`~crowd_evac.application.simulation.SimSnapshot` that a
         Renderer-conformant object can consume without error.
         """
-        sim, _ = build_simulation_from_scenario()
+        sim, _ = build_simulation_from_scenario(_SMALL_ROOM)
         mock_renderer = mocker.MagicMock()
         snapshot = sim.snapshot()
         mock_renderer.render(snapshot)
@@ -283,7 +288,7 @@ class TestEvacWindowPpmConsistency:
         scaled_ppm = 25.0
         self._patch_evac_window(mocker, scaled_ppm)
 
-        sim, floor_plan = build_simulation_from_scenario()
+        sim, floor_plan = build_simulation_from_scenario(_SMALL_ROOM)
         window = EvacWindow(sim, floor_plan)
 
         assert window._input_source.pixels_per_meter == pytest.approx(scaled_ppm)
@@ -301,7 +306,7 @@ class TestEvacWindowPpmConsistency:
         scaled_ppm = 25.0
         self._patch_evac_window(mocker, scaled_ppm)
 
-        sim, floor_plan = build_simulation_from_scenario()
+        sim, floor_plan = build_simulation_from_scenario(_SMALL_ROOM)
         window = EvacWindow(sim, floor_plan)
         src = window._input_source
 
@@ -321,11 +326,12 @@ class TestEvacWindowResize(TestEvacWindowPpmConsistency):
     """Resize refits renderer and input together (issue #7), headless."""
 
     def _window(self, mocker: MockerFixture) -> EvacWindow:
-        """Build a headless window at ppm 25 on the Lecture Hall."""
+        """Build a headless window at ppm 25 on the small fixture room."""
         self._patch_evac_window(mocker, 25.0)
         mocker.patch("arcade.Window.on_resize", return_value=None)
-        sim, floor_plan = build_simulation_from_scenario()
-        window = EvacWindow(sim, floor_plan)
+        sim, floor_plan = build_simulation_from_scenario(_SMALL_ROOM)
+        # Name the room so Reset rebuilds the small room, not lecture_hall.
+        window = EvacWindow(sim, floor_plan, _SMALL_ROOM)
         self.floor_plan = floor_plan
         return window
 
@@ -390,7 +396,7 @@ class TestEvacWindowResize(TestEvacWindowPpmConsistency):
         import numpy as np
 
         window = self._window(mocker)
-        reference, _ = build_simulation_from_scenario()
+        reference, _ = build_simulation_from_scenario(_SMALL_ROOM)
         for tick in range(20):
             if tick % 5 == 0:
                 window.on_resize(300 + 40 * tick, 400 - 10 * tick)

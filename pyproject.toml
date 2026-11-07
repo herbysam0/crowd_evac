@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "crowd-evac"
-version = "1.5.0"
+version = "1.5.1"
 description = "Real-time 2D crowd-evacuation game with NumPy simulation core"
 readme = "README.md"
 license = "MIT"
@@ -83,11 +83,13 @@ exclude = [
 minversion = "7.0"
 testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
-addopts = "-v --tb=short"
+# Opt-in groups are excluded from a bare ``pytest``.  Pass your own ``-m``
+# (e.g. ``-m perf``) to select one; the command line replaces this filter.
+addopts = "-v --tb=short -m 'not perf and not e2e and not render'"
 markers = [
-    "perf: performance / load tests — excluded from CI by default (run with -m perf)",
-    "render: tests that open a real arcade window (require a display; run with -m render)",
-    "e2e: full evacuation end-to-end runs; takes a few seconds (run with -m e2e)",
+    "perf: performance / load tests — excluded by default (run with -m perf)",
+    "render: tests that open a real arcade window (require a display; excluded by default, run with -m render)",
+    "e2e: full evacuation end-to-end runs; minutes in total (excluded by default, run with -m e2e)",
 ]
 filterwarnings = [
     # Third-party (pyglet, pulled in by arcade) uses a CPython API deprecated

@@ -379,81 +379,50 @@ class TestComputeSensitivity:
 # ---------------------------------------------------------------------------
 
 
+_E2E_SAMPLES: int = 4
+
+
+@pytest.fixture(scope="class")
+def prepass_e2e() -> tuple[SensitivityResult, list[FitnessResult]]:
+    """Run the real pre-pass once (~100 s) and share it across the class."""
+    cfg = FitnessConfig(max_workers=1)
+    return run_sensitivity_prepass(n_samples=_E2E_SAMPLES, config=cfg, seed=0)
+
+
 @pytest.mark.e2e
 class TestRunSensitivityPrepassE2E:
-    """End-to-end wiring of the sensitivity pre-pass with the real harness."""
+    """End-to-end wiring of the sensitivity pre-pass with the real harness.
 
-    _N_SAMPLES: int = 4
-    _N_E2E: int = 3  # total e2e test methods in this class
+    All three tests assert on one shared real pre-pass run, because each run
+    costs ~100 s and they exercise the same wiring.
+    """
 
-    def test_returns_sensitivity_and_fitness_list(self) -> None:
+    def test_returns_sensitivity_and_fitness_list(
+        self, prepass_e2e: tuple[SensitivityResult, list[FitnessResult]]
+    ) -> None:
         """run_sensitivity_prepass returns (SensitivityResult, list[FitnessResult])."""
-        from crowd_evac.optimization.fitness import evaluate_fitness as _real
-
-        n, counter = self._N_SAMPLES, [0]
-
-        def _tracked(params: ForceParams, config: FitnessConfig | None = None) -> FitnessResult:
-            counter[0] += 1
-            msg = f"  sample {counter[0]} of {n}"
-            print(msg, flush=True)
-            logger.info(msg)
-            return _real(params, config)
-
-        print(f"\n[E2E 1/{self._N_E2E}] test_returns_sensitivity_and_fitness_list", flush=True)
-        logger.info("[E2E 1/%d] test_returns_sensitivity_and_fitness_list", self._N_E2E)
-        cfg = FitnessConfig(max_workers=1)
-        with patch("crowd_evac.optimization.space.evaluate_fitness", side_effect=_tracked):
-            sens, fitness_list = run_sensitivity_prepass(
-                n_samples=n, config=cfg, seed=0, method="lhs"
-            )
+        sens, fitness_list = prepass_e2e
         assert isinstance(sens, SensitivityResult)
-        assert len(fitness_list) == n
+        assert len(fitness_list) == _E2E_SAMPLES
         assert all(isinstance(fr, FitnessResult) for fr in fitness_list)
 
-    def test_sensitivity_has_n_params_entries(self) -> None:
+    def test_sensitivity_has_n_params_entries(
+        self, prepass_e2e: tuple[SensitivityResult, list[FitnessResult]]
+    ) -> None:
         """Sensitivity result from the real pre-pass has N_PARAMS entries."""
-        from crowd_evac.optimization.fitness import evaluate_fitness as _real
-
-        n, counter = self._N_SAMPLES, [0]
-
-        def _tracked(params: ForceParams, config: FitnessConfig | None = None) -> FitnessResult:
-            counter[0] += 1
-            msg = f"  sample {counter[0]} of {n}"
-            print(msg, flush=True)
-            logger.info(msg)
-            return _real(params, config)
-
-        print(f"\n[E2E 2/{self._N_E2E}] test_sensitivity_has_n_params_entries", flush=True)
-        logger.info("[E2E 2/%d] test_sensitivity_has_n_params_entries", self._N_E2E)
-        cfg = FitnessConfig(max_workers=1)
-        with patch("crowd_evac.optimization.space.evaluate_fitness", side_effect=_tracked):
-            sens, _ = run_sensitivity_prepass(n_samples=n, config=cfg, seed=0)
+        sens, _ = prepass_e2e
         assert len(sens.abs_spearman_realism) == N_PARAMS
         assert len(sens.rank_combined) == N_PARAMS
 
-    def test_fitness_results_have_finite_objectives(self) -> None:
+    def test_fitness_results_have_finite_objectives(
+        self, prepass_e2e: tuple[SensitivityResult, list[FitnessResult]]
+    ) -> None:
         """All fitness results carry finite, non-negative objectives."""
-        from crowd_evac.optimization.fitness import evaluate_fitness as _real
-
-        n, counter = self._N_SAMPLES, [0]
-
-        def _tracked(params: ForceParams, config: FitnessConfig | None = None) -> FitnessResult:
-            counter[0] += 1
-            msg = f"  sample {counter[0]} of {n}"
-            print(msg, flush=True)
-            logger.info(msg)
-            return _real(params, config)
-
-        print(f"\n[E2E 3/{self._N_E2E}] test_fitness_results_have_finite_objectives", flush=True)
-        logger.info("[E2E 3/%d] test_fitness_results_have_finite_objectives", self._N_E2E)
-        cfg = FitnessConfig(max_workers=1)
-        with patch("crowd_evac.optimization.space.evaluate_fitness", side_effect=_tracked):
-            _, fitness_list = run_sensitivity_prepass(n_samples=n, config=cfg, seed=0)
+        _, fitness_list = prepass_e2e
         for fr in fitness_list:
             realism, evac = fr.objectives
             assert np.isfinite(realism) and realism >= 0.0
             assert np.isfinite(evac) and evac >= 0.0
-
 
 # ---------------------------------------------------------------------------
 # run_sensitivity_prepass — unit (mocked fitness)

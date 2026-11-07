@@ -259,3 +259,6 @@ def run_dashboard() -> None:
     except KeyboardInterrupt:
         logger.info("Dashboard interrupted; closing.")
         window.on_close()
+        # pyglet's on_close only closes while its event loop is running; the
+        # loop has already been left, so close explicitly or the window leaks.
+        window.close()

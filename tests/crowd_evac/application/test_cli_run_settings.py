@@ -24,14 +24,16 @@ from crowd_evac.application.cli import (
 from crowd_evac.application.hazard_args import HazardOutOfRoomError
 from crowd_evac.scenarios.schema import EmergencyEventData
 
-_ROOM = "lecture_hall"
+# Small room: these tests check wiring, and building lecture_hall costs ~2.5 s
+# per test (fine 0.05 m grid).
+_ROOM = "fixture_minimal"
 _COUNT = 5
 _SEED = 7
 _FIRE_TICK = 3
 _FIRE: EmergencyEventData = {
     "tick": _FIRE_TICK,
     "type": "place_panic_source",
-    "pos": [25.0, 15.0],
+    "pos": [5.0, 4.0],
 }
 
 

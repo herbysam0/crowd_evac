@@ -96,7 +96,7 @@ class TestOpening:
         """Verify choosing another room changes the size hint."""
         panel = window.panel
         panel._dropdown.value = _ROOM
-        assert "10 x 8 m" in panel._hint.text
+        assert "10 x 9 m" in panel._hint.text  # 10 x 8 plus a 1 m door apron
         assert panel.cancel_button.disabled is True
 
 
@@ -110,7 +110,8 @@ class TestHazardList:
         hazards.add_row()
         assert len(hazards.rows) == 2
         assert hazards.read()[0].source_type == "fire"
-        assert hazards.read()[0].x_min == "25"  # lecture_hall is 50 x 30
+        # lecture_hall is 52 x 31 including its door aprons
+        assert hazards.read()[0].x_min == "26"
         hazards.remove_row(hazards.rows[0])
         assert len(hazards.rows) == 1
         _frame(window)
@@ -268,6 +269,11 @@ class TestBatches:
         dw.run_dashboard()
         assert cancels == [True]
         assert created[0].has_exit
+        # A window left open keeps pyglet's event loop alive, so the next
+        # arcade.run() in the same process would never return.
+        import pyglet
+
+        assert created[0] not in set(pyglet.app.windows)
 
     def test_failed_batch_shows_message(self, window: DashboardWindow) -> None:
         """Verify a batch the child cannot run shows its error."""
