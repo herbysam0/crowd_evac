@@ -279,32 +279,49 @@ docs/              # Documentation (PRD, plans)
 ```powershell
 flake8 src/           # PEP 8 linting
 mypy src/ --strict    # Strict type checking
-pytest tests/ -v      # Run all tests (excludes perf, e2e, render)
+pytest -q             # Default run: everything except perf, e2e, render (about 3.5 min)
+```
+
+### Before a PR or release: the complete set
+```powershell
+pytest -q
+pytest -m "perf or e2e or render" -q -o faulthandler_timeout=300
+```
+
+
+### One test file
+.\.venv\Scripts\python -m pytest tests\crowd_evac\application\test_cli.py -q
+
+### One test
+.\.venv\Scripts\python -m pytest "tests\crowd_evac\application\test_cli.py::TestSimStateMachine::test_paused_initial_has_hint" -q
+
+### Stop at first failure
+.\.venv\Scripts\python -m pytest -q -x
+
+### Coverage report
+```powershell
 pytest tests/ --cov=src --cov-branch --cov-report=term-missing  # Coverage report
 ```
 
-### Running all tests except performance, render, e2e
-
+### Opt-in groups
+### Real windows (needs a display; about 50 s)
 ```powershell
-flake8 src/; mypy src/ --strict --no-error-summary; pytest tests/ -qq --no-header -m "not perf and not render and not e2e"
+.\.venv\Scripts\python -m pytest -m render -q -o faulthandler_timeout=60
 ```
 
-### Running Tests by Category
-
-Tests are organized by marker. Default runs exclude performance, end-to-end, and render tests for speed:
-
+### Full evacuation runs (about 2.5 min, mostly the shared pre-pass)
 ```powershell
-# All unit tests only (default, ~5 seconds)
-pytest tests/ -v
+.\.venv\Scripts\python -m pytest -m e2e -q
+```
 
-# Include end-to-end headless tests
-pytest tests/ -m e2e -v
+### Performance and load tests (about 90 s). Run when working on simulation or force speed.
+```powershell
+.\.venv\Scripts\python -m pytest -m perf -q -s
+```
 
-# Include render tests (requires display)
-pytest tests/ -m render -v
-
-# Run a specific test file
-pytest tests/crowd_evac/domain/test_forces.py -v
+### All three opt-in groups together (about 5 min)
+```powershell
+.\.venv\Scripts\python -m pytest -m "perf or e2e or render" -q -o faulthandler_timeout=300
 ```
 
 ### Performance Testing
