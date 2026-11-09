@@ -95,9 +95,9 @@ class SpatialHash:
         # Shift so the minimum cell index is 1; neighbour queries then span
         # [0, max+1] without underflow, and the stride (max cy + 2) leaves
         # room for the +/-1 offset so linear keys never wrap between rows.
-        self._cx = cells[:, 0] - cells[:, 0].min() + 1
-        self._cy = cells[:, 1] - cells[:, 1].min() + 1
-        self._stride = int(self._cy.max()) + 2
+        self._cx = cells[:, 0] - np.min(cells[:, 0]) + 1
+        self._cy = cells[:, 1] - np.min(cells[:, 1]) + 1
+        self._stride = int(np.max(self._cy)) + 2
         self._cell_key = self._cx * self._stride + self._cy
 
     @classmethod
