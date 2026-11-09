@@ -7,6 +7,7 @@ and hosts the :class:`~crowd_evac.adapters.render.designer_panel.DesignerPanel`.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
 
@@ -31,6 +32,11 @@ from crowd_evac.adapters.render.designer_style import (
     MUTED_COLOR,
     TEXT_COLOR,
 )
+from crowd_evac.adapters.render.designer_underlay import (
+    UnderlaySession,
+    pick_photo,
+)
+from crowd_evac.adapters.render.designer_underlay_panel import UnderlayControls
 from crowd_evac.adapters.render.designer_view import (
     CANVAS_MARGIN_PX,
     MIN_WINDOW_H,
@@ -40,9 +46,11 @@ from crowd_evac.adapters.render.designer_view import (
     NOTICE_BG_COLOR,
     draw_alert,
     draw_overlays,
-    draw_room,
+    draw_floor,
+    draw_items,
     fit_window_size,
 )
+from crowd_evac.adapters.render.designer_widgets import gap
 from crowd_evac.adapters.render.viewport import Viewport, fit_viewport
 from crowd_evac.designer.controller import DesignController, Tool
 
@@ -64,12 +72,14 @@ class DesignerWindow(arcade.Window):
         self,
         ctl: DesignController | None = None,
         directory: Path = SCENARIOS_DIR,
+        picker: Callable[[], Path | None] = pick_photo,
     ) -> None:
         """Open the window.
 
         Args:
             ctl: Controller to edit; a fresh design by default.
             directory: Where Save writes scenarios.
+            picker: Chooses the underlay photo (injectable for tests).
         """
         super().__init__(
             MIN_WINDOW_W, MIN_WINDOW_H, WINDOW_TITLE, resizable=True
@@ -90,8 +100,20 @@ class DesignerWindow(arcade.Window):
         self._banner_color = ALERT_BG_COLOR
         self.alert_left = 0.0
         self.manager = gui.UIManager()
+        self.underlay = UnderlaySession(self.ctl, picker)
+        self._underlay_controls = UnderlayControls(
+            self.underlay.load,
+            self.underlay.toggle,
+            lambda: self.underlay.step_opacity(-1),
+            lambda: self.underlay.step_opacity(1),
+            self.underlay.clear,
+        )
         self.panel = DesignerPanel(
-            self.ctl, self._on_save, self._on_load, list_scenarios(directory)
+            self.ctl,
+            self._on_save,
+            self._on_load,
+            list_scenarios(directory),
+            [gap(), *self._underlay_controls.rows()],
         )
         self.manager.add(self.panel.widget)
         self.manager.enable()
@@ -191,7 +213,10 @@ class DesignerWindow(arcade.Window):
         self.clear()
         self.vmap = self._fit()
         self.panel.refresh()
-        draw_room(self.vmap, self.ctl.model)
+        self._underlay_controls.sync(self.underlay.underlay)
+        draw_floor(self.vmap, self.ctl.model)
+        self.underlay.draw(self.vmap, self.ctl.model.layout.room)
+        draw_items(self.vmap, self.ctl.model)
         draw_overlays(
             self.vmap,
             self.ctl.model,
@@ -237,9 +262,12 @@ class DesignerWindow(arcade.Window):
             self.ctl.release(*self.vmap.to_world(x, y))
 
     def on_key_press(self, symbol: int, modifiers: int) -> None:
-        """Delete removes the selection (not while typing); Esc selects."""
-        if symbol == arcade.key.DELETE and not self.panel.is_typing():
+        """Del deletes, U toggles the photo (not while typing); Esc selects."""
+        typing = self.panel.is_typing()
+        if symbol == arcade.key.DELETE and not typing:
             self.ctl.delete_selected()
+        elif symbol == arcade.key.U and not typing:
+            self.underlay.toggle()
         elif symbol == arcade.key.ESCAPE:
             self.ctl.set_tool(Tool.SELECT)
 

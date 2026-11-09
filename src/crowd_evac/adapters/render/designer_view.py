@@ -123,11 +123,16 @@ def _outline(vp: Viewport, rect: Rect, color: RGBA255, width: float) -> None:
     arcade.draw_lrbt_rectangle_outline(left, right, bottom, top, color, width)
 
 
-def draw_room(vp: Viewport, model: DesignModel) -> None:
-    """Draw floor, 1 m grid, walls, obstacles and doorways."""
+def draw_floor(vp: Viewport, model: DesignModel) -> None:
+    """Draw the room floor (beneath the underlay photo)."""
+    room = model.layout.room
+    _fill(vp, (0.0, 0.0, room.width_m, room.height_m), FLOOR_COLOR)
+
+
+def draw_items(vp: Viewport, model: DesignModel) -> None:
+    """Draw 1 m grid, obstacles, walls and doorways."""
     layout = model.layout
     room = layout.room
-    _fill(vp, (0.0, 0.0, room.width_m, room.height_m), FLOOR_COLOR)
     draw_grid(room.width_m, room.height_m, vp.ppm, vp.ox, vp.oy)
     for obs in layout.obstacles.values():
         _fill(vp, obs.rect, OBSTACLE_COLOR)
@@ -135,6 +140,12 @@ def draw_room(vp: Viewport, model: DesignModel) -> None:
         _fill(vp, model.wall_rect(wall_id), WALL_COLOR)
     for door_id in layout.doorways:
         _fill(vp, model.doorway_rect(door_id), EXIT_COLOR)
+
+
+def draw_room(vp: Viewport, model: DesignModel) -> None:
+    """Draw floor, 1 m grid, walls, obstacles and doorways."""
+    draw_floor(vp, model)
+    draw_items(vp, model)
 
 
 def draw_alert(

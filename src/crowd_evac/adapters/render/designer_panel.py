@@ -58,6 +58,7 @@ class DesignerPanel:
         on_save: Callable[[], None],
         on_load: Callable[[], None],
         scenarios: list[str],
+        extra_rows: list[gui.UIWidget] | None = None,
     ) -> None:
         """Build all widgets.
 
@@ -66,8 +67,10 @@ class DesignerPanel:
             on_save: Called when Save is pressed.
             on_load: Called when Load is pressed.
             scenarios: Saved scenario names offered for loading.
+            extra_rows: Optional widgets appended to the left column.
         """
         self._ctl = ctl
+        self._extra_rows = extra_rows or []
         self._active: dict[Tool, bool] = {}
         self._tool_buttons = {t: self._tool_button(t) for t in _BUTTON_TOOLS}
         self._room_inputs = self._room_fields(ctl.model.layout.room)
@@ -181,6 +184,7 @@ class DesignerPanel:
             make_row(make_label("Wall thickness"), self._wall_t),
             make_row(make_label("Door width"), self._door_w),
             make_row(make_label("Door capacity"), self._door_cap),
+            *self._extra_rows,
         ]
 
     def _selection_rows(

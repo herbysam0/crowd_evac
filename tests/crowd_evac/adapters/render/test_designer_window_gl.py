@@ -247,3 +247,91 @@ class TestSaveBannerGL:
             window.on_draw()
         finally:
             window.close()
+
+
+@pytest.mark.render
+class TestDesignerUnderlayGL:
+    """Photo underlay through the real window with a fake picker."""
+
+    @staticmethod
+    def _png(tmp_path: Path) -> Path:
+        from PIL import Image
+
+        png = tmp_path / "plan.png"
+        Image.new("RGB", (40, 20), (200, 10, 10)).save(png)
+        return png
+
+    def test_load_toggle_opacity_and_clean_save(self, tmp_path: Path) -> None:
+        """Photo loads, toggles via U, steps opacity, never touches JSON."""
+        import arcade
+
+        from crowd_evac.adapters.render.designer_window import DesignerWindow
+
+        png = self._png(tmp_path)
+        out_a, out_b = tmp_path / "a", tmp_path / "b"
+        out_a.mkdir()
+        out_b.mkdir()
+        window = DesignerWindow(ready_controller(), out_a, lambda: png)
+        try:
+            clean = window._clean
+            window._on_save()
+            seq = window.ctl.notice_seq
+            window.underlay.load()
+            assert window.underlay.underlay is not None
+            assert window.ctl.notice_seq == seq + 1
+            window.on_key_press(arcade.key.U, 0)
+            assert window.underlay.underlay.visible is False
+            window.on_key_press(arcade.key.U, 0)
+            window.underlay.step_opacity(1)
+            assert window.underlay.underlay.opacity == pytest.approx(0.6)
+            window.on_draw()
+            assert window.ctl.model.layout == clean
+            window._directory = out_b
+            window._pending_save = None
+            window._on_save()
+            assert (out_a / "saved_room.json").read_text(
+                encoding="utf-8"
+            ) == (out_b / "saved_room.json").read_text(encoding="utf-8")
+            assert "plan.png" not in (out_b / "saved_room.json").read_text(
+                encoding="utf-8"
+            )
+        finally:
+            window.close()
+
+    def test_cancel_noop_and_bad_file_alerts(self, tmp_path: Path) -> None:
+        """Cancel changes nothing; unreadable file raises an alert."""
+        from crowd_evac.adapters.render.designer_window import DesignerWindow
+
+        bad = tmp_path / "bad.png"
+        bad.write_text("nope", encoding="utf-8")
+        choice: list[Path | None] = [None]
+        window = DesignerWindow(
+            ready_controller(), tmp_path, lambda: choice[0]
+        )
+        try:
+            window.underlay.load()
+            assert window.underlay.underlay is None
+            assert window.ctl.alert_seq == 0
+            choice[0] = bad
+            window.underlay.load()
+            assert window.underlay.underlay is None
+            assert window.ctl.alert.startswith("PHOTO NOT LOADED")
+        finally:
+            window.close()
+
+    def test_u_key_ignored_while_typing(self, tmp_path: Path) -> None:
+        """U does not toggle while a text field has focus."""
+        import arcade
+
+        from crowd_evac.adapters.render.designer_window import DesignerWindow
+
+        png = self._png(tmp_path)
+        window = DesignerWindow(ready_controller(), tmp_path, lambda: png)
+        try:
+            window.underlay.load()
+            window.panel.is_typing = lambda: True  # type: ignore[method-assign]
+            window.on_key_press(arcade.key.U, 0)
+            assert window.underlay.underlay is not None
+            assert window.underlay.underlay.visible is True
+        finally:
+            window.close()
