@@ -80,7 +80,7 @@ class SeededRNG:
         """
         # Allow 'size' as alias for 'shape' (NumPy convention)
         output_shape = size if size is not None else shape
-        return self.generator.uniform(low, high, output_shape)
+        return np.asarray(self.generator.uniform(low, high, output_shape))
 
     def draw_choice(
         self,

@@ -231,6 +231,12 @@ with `--scenario <name> --agents N`. **Open saved room** loads an existing
 scenario for editing. Saved files hold the room only. `--design` cannot be
 combined with `--list`, `--scenario`, `--agents`, `--seed` or `--hazard`.
 
+**Underlay photo:** `Load photo...` (png/jpg/bmp) shows a floor plan under the
+grid, fitted to the room with its aspect ratio kept, to trace by eye.
+`Show/Hide` (or `U`) toggles it, `-`/`+` set opacity in 10 % steps and `Clear`
+drops it. The photo is a session-only aid: never saved or referenced in the
+scenario JSON.
+
 ## Project Structure
 
 ```

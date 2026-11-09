@@ -443,12 +443,19 @@ class TestBundledRooms:
     """Every shipped room is schema 2.1 and holds no run settings."""
 
     def test_catalog_matches_expected_rooms(self) -> None:
-        """Verify the bundled room set (no hazard_lecture_hall, no _small)."""
+        """Verify the shipped rooms exist; extra user rooms are tolerated.
+
+        Rooms saved from the designer land in the same folder, so extras
+        must not fail the test. Retired rooms must stay gone.
+        """
         from crowd_evac.adapters.io.scenario_catalog import (
             list_bundled_scenarios,
         )
 
-        assert sorted(list_bundled_scenarios()) == sorted(BUNDLED_ROOMS)
+        listed = set(list_bundled_scenarios())
+        assert set(BUNDLED_ROOMS) <= listed
+        assert "hazard_lecture_hall" not in listed
+        assert not any(name.endswith("_small") for name in listed)
 
     @pytest.mark.parametrize("name", BUNDLED_ROOMS)
     def test_room_loads_as_2_1(self, name: str) -> None:

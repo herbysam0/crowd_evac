@@ -104,3 +104,21 @@ def test_draw_room_uses_shared_grid(monkeypatch: pytest.MonkeyPatch) -> None:
     dv.draw_room(Viewport(ppm=20.0, ox=5.0, oy=7.0), model)
     room = model.layout.room
     grid.assert_called_once_with(room.width_m, room.height_m, 20.0, 5.0, 7.0)
+
+
+def test_draw_floor_and_items_split(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Grid belongs to draw_items so the photo sits between floor and grid."""
+    from unittest.mock import MagicMock
+
+    from crowd_evac.adapters.render import designer_view as dv
+    from crowd_evac.adapters.render.viewport import Viewport
+
+    grid = MagicMock()
+    monkeypatch.setattr(dv, "draw_grid", grid)
+    monkeypatch.setattr(dv.arcade, "draw_lrbt_rectangle_filled", MagicMock())
+    model = ready_controller().model
+    vp = Viewport(ppm=20.0, ox=5.0, oy=7.0)
+    dv.draw_floor(vp, model)
+    grid.assert_not_called()
+    dv.draw_items(vp, model)
+    grid.assert_called_once()

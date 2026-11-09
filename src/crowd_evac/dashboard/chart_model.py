@@ -135,7 +135,7 @@ def build_chart(curves: EvacuationCurves, plot_width_px: int) -> ChartData:
         return ChartData((), None, 1.0, 1.0, nice_ticks(0.0, 1.0),
                          nice_ticks(0.0, 1.0))
     x_max = max(float(curves.times_s[-1]), _EPS)
-    y_max = max(float(curves.per_run.max()), 1.0)
+    y_max = max(float(np.max(curves.per_run)), 1.0)
     mean = reduce_series(curves.times_s, curves.mean, plot_width_px)
     return ChartData(
         runs=runs, mean=mean, x_max=x_max, y_max=y_max,

@@ -55,7 +55,8 @@ class TestRunResultStructure:
     """RunResult fields have the expected types and shapes after a real run."""
 
     @pytest.fixture(scope="class")
-    def result(self) -> RunResult:
+    @classmethod
+    def result(cls) -> RunResult:
         """Single evaluate() call shared across tests in this class."""
         return _evaluate(ForceParams.defaults(), _SCENARIO, _SEED)
 
@@ -191,12 +192,14 @@ class TestEvaluateReproducibility:
     """Same (params, scenario, seed) triple produces bit-identical results."""
 
     @pytest.fixture(scope="class")
-    def run_a(self) -> RunResult:
+    @classmethod
+    def run_a(cls) -> RunResult:
         """First run."""
         return _evaluate(ForceParams.defaults(), _SCENARIO, _SEED)
 
     @pytest.fixture(scope="class")
-    def run_b(self) -> RunResult:
+    @classmethod
+    def run_b(cls) -> RunResult:
         """Second run — same args, independent call."""
         return _evaluate(ForceParams.defaults(), _SCENARIO, _SEED)
 

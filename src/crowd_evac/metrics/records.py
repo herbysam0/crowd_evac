@@ -169,10 +169,10 @@ def _peak_density_m2(snapshot: SimSnapshot, cell_size: float) -> float:
     y = active_pos[:, 1]
 
     half = 0.5 * cell_size
-    x_min = float(x.min()) - half
-    x_max = float(x.max()) + half
-    y_min = float(y.min()) - half
-    y_max = float(y.max()) + half
+    x_min = float(np.min(x)) - half
+    x_max = float(np.max(x)) + half
+    y_min = float(np.min(y)) - half
+    y_max = float(np.max(y)) + half
 
     nx = max(1, int(np.ceil((x_max - x_min) / cell_size)))
     ny = max(1, int(np.ceil((y_max - y_min) / cell_size)))
@@ -184,4 +184,4 @@ def _peak_density_m2(snapshot: SimSnapshot, cell_size: float) -> float:
         range=[[x_min, x_max], [y_min, y_max]],
     )
 
-    return float(hist.max()) / (cell_size * cell_size)
+    return float(np.max(hist)) / (cell_size * cell_size)

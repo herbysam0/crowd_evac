@@ -199,8 +199,8 @@ def summarize(outcomes: Sequence[RunOutcome]) -> RunSummary:
         incomplete=incomplete,
         mean_s=float(arr.mean()),
         std_s=std,
-        min_s=float(arr.min()),
-        max_s=float(arr.max()),
+        min_s=float(np.min(arr)),
+        max_s=float(np.max(arr)),
         speed_mean_mps=speed_mean,
         speed_std_mps=speed_std,
     )

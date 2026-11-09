@@ -363,10 +363,10 @@ def f_herd(
     inv_cell = 1.0 / radius
     cx: npt.NDArray[np.intp] = np.floor(pos[:, 0] * inv_cell).astype(np.intp)
     cy: npt.NDArray[np.intp] = np.floor(pos[:, 1] * inv_cell).astype(np.intp)
-    cx -= cx.min()
-    cy -= cy.min()
-    n_cx = int(cx.max()) + 1
-    n_cy = int(cy.max()) + 1
+    cx -= np.min(cx)
+    cy -= np.min(cy)
+    n_cx = int(np.max(cx)) + 1
+    n_cy = int(np.max(cy)) + 1
 
     # Accumulate per-cell velocity sums and counts, padding by one cell on every
     # side so the 3x3 box sum needs no bounds handling. Padded index = cell + 1.
