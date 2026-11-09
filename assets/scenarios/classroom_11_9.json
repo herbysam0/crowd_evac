@@ -1,0 +1,183 @@
+{
+  "schema_version": "2.1",
+  "name": "my_room",
+  "floor_plan": {
+    "width_m": 12.0,
+    "height_m": 9.0,
+    "walls": [
+      {
+        "x": 1.0,
+        "y": 0.2,
+        "width": 0.4,
+        "height": 8.5,
+        "label": "wall_1"
+      },
+      {
+        "x": 1.3,
+        "y": 8.6,
+        "width": 10.2,
+        "height": 0.2,
+        "label": "wall_2"
+      },
+      {
+        "x": 11.3,
+        "y": 0.3,
+        "width": 0.2,
+        "height": 8.299999999999999,
+        "label": "wall_3"
+      },
+      {
+        "x": 1.3,
+        "y": 0.3,
+        "width": 10.1,
+        "height": 0.2,
+        "label": "wall_4"
+      },
+      {
+        "x": 0.0,
+        "y": 0.0,
+        "width": 1.0,
+        "height": 1.975,
+        "label": "apron_wall_west_1"
+      },
+      {
+        "x": 0.0,
+        "y": 2.825,
+        "width": 1.0,
+        "height": 6.175,
+        "label": "apron_wall_west_2"
+      }
+    ],
+    "obstacles": [
+      {
+        "x": 2.5,
+        "y": 5.4,
+        "width": 1.2999999999999998,
+        "height": 0.7999999999999998,
+        "label": "obstacle_7"
+      },
+      {
+        "x": 4.5,
+        "y": 5.4,
+        "width": 1.2999999999999998,
+        "height": 0.7999999999999998,
+        "label": "obstacle_8"
+      },
+      {
+        "x": 6.9,
+        "y": 5.4,
+        "width": 1.2999999999999998,
+        "height": 0.7999999999999998,
+        "label": "obstacle_9"
+      },
+      {
+        "x": 8.7,
+        "y": 5.4,
+        "width": 1.2999999999999998,
+        "height": 0.7999999999999998,
+        "label": "obstacle_10"
+      },
+      {
+        "x": 2.5,
+        "y": 3.5,
+        "width": 1.2999999999999998,
+        "height": 0.7999999999999998,
+        "label": "obstacle_11"
+      },
+      {
+        "x": 4.5,
+        "y": 3.5,
+        "width": 1.2999999999999998,
+        "height": 0.7999999999999998,
+        "label": "obstacle_12"
+      },
+      {
+        "x": 6.8,
+        "y": 3.5,
+        "width": 1.2999999999999998,
+        "height": 0.7999999999999998,
+        "label": "obstacle_13"
+      },
+      {
+        "x": 8.7,
+        "y": 3.5,
+        "width": 1.2999999999999998,
+        "height": 0.7999999999999998,
+        "label": "obstacle_14"
+      },
+      {
+        "x": 2.5,
+        "y": 1.7,
+        "width": 1.2999999999999998,
+        "height": 0.8,
+        "label": "obstacle_15"
+      },
+      {
+        "x": 4.6,
+        "y": 1.7,
+        "width": 1.3000000000000003,
+        "height": 0.8,
+        "label": "obstacle_16"
+      },
+      {
+        "x": 6.8,
+        "y": 1.7,
+        "width": 1.2999999999999998,
+        "height": 0.8,
+        "label": "obstacle_17"
+      },
+      {
+        "x": 8.7,
+        "y": 1.7,
+        "width": 1.2999999999999998,
+        "height": 0.8,
+        "label": "obstacle_18"
+      },
+      {
+        "x": 9.6,
+        "y": 7.3,
+        "width": 0.7000000000000011,
+        "height": 1.0000000000000009,
+        "label": "obstacle_19"
+      },
+      {
+        "x": 10.5,
+        "y": 7.6,
+        "width": 0.5999999999999996,
+        "height": 0.7000000000000011,
+        "label": "obstacle_20"
+      },
+      {
+        "x": 5.0,
+        "y": 6.6,
+        "width": 2.7,
+        "height": 1.0,
+        "label": "obstacle_21"
+      },
+      {
+        "x": 1.5,
+        "y": 7.7,
+        "width": 1.7000000000000002,
+        "height": 0.7000000000000002,
+        "label": "obstacle_22"
+      },
+      {
+        "x": 10.6,
+        "y": 0.6,
+        "width": 0.5999999999999996,
+        "height": 0.6,
+        "label": "obstacle_23"
+      }
+    ],
+    "exits": [
+      {
+        "x": 1.4,
+        "y": 2.4,
+        "width_m": 0.85,
+        "side": "west",
+        "capacity_per_second": 1.05,
+        "label": "door_6"
+      }
+    ]
+  }
+}
